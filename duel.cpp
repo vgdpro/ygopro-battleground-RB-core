@@ -5,6 +5,7 @@
  *      Author: Argon
  */
 
+#include <cstdio>
 #include <cstring>
 #include "duel.h"
 #include "interpreter.h"
@@ -15,142 +16,181 @@
 #include "ocgapi.h"
 #include "buffer.h"
 
-duel::duel() {
-	lua = new interpreter(this, false);
-	game_field = new field(this);
-	game_field->temp_card = new_card(TEMP_CARD_ID);
-	message_buffer.reserve(SIZE_MESSAGE_BUFFER);
+duel::duel()
+{
+    lua = new interpreter(this, false);
+    init_fields();
+    message_buffer.reserve(SIZE_MESSAGE_BUFFER);
 #ifdef _WIN32
-	_set_error_mode(_OUT_TO_MSGBOX);
+    _set_error_mode(_OUT_TO_MSGBOX);
 #endif // _WIN32
 }
-duel::~duel() {
-	for(auto& pcard : cards)
-		delete pcard;
-	for(auto& pgroup : groups)
-		delete pgroup;
-	for(auto& peffect : effects)
-		delete peffect;
-	delete game_field;
-	delete lua;
+void duel::init_fields()
+{
+    for (int i = 0; i < FIELD_COUNT; ++i){
+        fields[i] = new field(this);
+        fields[i]->temp_card = new_card(TEMP_CARD_ID);
+    }
+    game_field = fields[0];
+    fprintf(stderr, "[DEBUG] init_fields: fields[0]=%p temp_card=%p\n", (void *)fields[0], (void *)fields[0]->temp_card);
+    fprintf(stderr, "[DEBUG] init_fields: fields[1]=%p temp_card=%p (NULL=bug)\n", (void *)fields[1], (void *)fields[1]->temp_card);
+    fprintf(stderr, "[DEBUG] init_fields: fields[2]=%p temp_card=%p (NULL=bug)\n", (void *)fields[2], (void *)fields[2]->temp_card);
 }
-void duel::clear() {
-	for(auto& pcard : cards) {
-		lua->unregister_card(pcard);
-		delete pcard;
-	}
-	for(auto& pgroup : groups) {
-		lua->unregister_group(pgroup);
-		delete pgroup;
-	}
-	for(auto& peffect : effects) {
-		lua->unregister_effect(peffect);
-		delete peffect;
-	}
-	delete game_field;
-	cards.clear();
-	groups.clear();
-	effects.clear();
-	assumes.clear();
-	sgroups.clear();
-	uncopy.clear();
-	game_field = new field(this);
-	game_field->temp_card = new_card(TEMP_CARD_ID);
+duel::~duel()
+{
+    for (auto &pcard : cards)
+        delete pcard;
+    for (auto &pgroup : groups)
+        delete pgroup;
+    for (auto &peffect : effects)
+        delete peffect;
+    for (int i = 0; i < FIELD_COUNT; ++i)
+        delete fields[i];
+    delete lua;
 }
-card* duel::new_card(uint32_t code) {
-	card* pcard = new card(this);
-	cards.insert(pcard);
-	if (code != TEMP_CARD_ID)
-		::read_card(code, &(pcard->data));
-	pcard->data.code = code;
-	lua->register_card(pcard);
-	return pcard;
+void duel::clear()
+{
+    for (auto &pcard : cards)
+    {
+        lua->unregister_card(pcard);
+        delete pcard;
+    }
+    for (auto &pgroup : groups)
+    {
+        lua->unregister_group(pgroup);
+        delete pgroup;
+    }
+    for (auto &peffect : effects)
+    {
+        lua->unregister_effect(peffect);
+        delete peffect;
+    }
+    for (int i = 0; i < FIELD_COUNT; ++i)
+        delete fields[i];
+    cards.clear();
+    groups.clear();
+    effects.clear();
+    assumes.clear();
+    sgroups.clear();
+    uncopy.clear();
+    init_fields();
 }
-group* duel::register_group(group* pgroup) {
-	groups.insert(pgroup);
-	if(lua->call_depth)
-		sgroups.insert(pgroup);
-	lua->register_group(pgroup);
-	return pgroup;
+card *duel::new_card(uint32_t code)
+{
+    card *pcard = new card(this);
+    cards.insert(pcard);
+    if (code != TEMP_CARD_ID)
+        ::read_card(code, &(pcard->data));
+    pcard->data.code = code;
+    lua->register_card(pcard);
+    return pcard;
 }
-group* duel::new_group() {
-	group* pgroup = new group(this);
-	return register_group(pgroup);
+group *duel::register_group(group *pgroup)
+{
+    groups.insert(pgroup);
+    if (lua->call_depth)
+        sgroups.insert(pgroup);
+    lua->register_group(pgroup);
+    return pgroup;
 }
-group* duel::new_group(card* pcard) {
-	group* pgroup = new group(this, pcard);
-	return register_group(pgroup);
+group *duel::new_group()
+{
+    group *pgroup = new group(this);
+    return register_group(pgroup);
 }
-group* duel::new_group(const card_set& cset) {
-	group* pgroup = new group(this, cset);
-	return register_group(pgroup);
+group *duel::new_group(card *pcard)
+{
+    group *pgroup = new group(this, pcard);
+    return register_group(pgroup);
 }
-effect* duel::new_effect() {
-	effect* peffect = new effect(this);
-	effects.insert(peffect);
-	lua->register_effect(peffect);
-	return peffect;
+group *duel::new_group(const card_set &cset)
+{
+    group *pgroup = new group(this, cset);
+    return register_group(pgroup);
 }
-void duel::delete_card(card* pcard) {
-	lua->unregister_card(pcard);
-	cards.erase(pcard);
-	delete pcard;
+effect *duel::new_effect()
+{
+    effect *peffect = new effect(this);
+    effects.insert(peffect);
+    lua->register_effect(peffect);
+    return peffect;
 }
-void duel::delete_group(group* pgroup) {
-	lua->unregister_group(pgroup);
-	groups.erase(pgroup);
-	sgroups.erase(pgroup);
-	delete pgroup;
+void duel::delete_card(card *pcard)
+{
+    lua->unregister_card(pcard);
+    cards.erase(pcard);
+    delete pcard;
 }
-void duel::delete_effect(effect* peffect) {
-	lua->unregister_effect(peffect);
-	effects.erase(peffect);
-	delete peffect;
+void duel::delete_group(group *pgroup)
+{
+    lua->unregister_group(pgroup);
+    groups.erase(pgroup);
+    sgroups.erase(pgroup);
+    delete pgroup;
 }
-int32_t duel::read_buffer(byte* buf) {
-	auto size = buffer_size();
-	if (size)
-		std::memcpy(buf, message_buffer.data(), size);
-	return (int32_t)size;
+void duel::delete_effect(effect *peffect)
+{
+    lua->unregister_effect(peffect);
+    effects.erase(peffect);
+    delete peffect;
 }
-void duel::release_script_group() {
-	for(auto& pgroup : sgroups) {
-		if(pgroup->is_readonly == GTYPE_DEFAULT) {
-			lua->unregister_group(pgroup);
-			groups.erase(pgroup);
-			delete pgroup;
-		}
-	}
-	sgroups.clear();
+int32_t duel::read_buffer(byte *buf)
+{
+    auto size = buffer_size();
+    if (size)
+        std::memcpy(buf, message_buffer.data(), size);
+    return (int32_t)size;
 }
-void duel::restore_assumes() {
-	for(auto& pcard : assumes)
-		pcard->assume_type = 0;
-	assumes.clear();
+void duel::release_script_group()
+{
+    for (auto &pgroup : sgroups)
+    {
+        if (pgroup->is_readonly == GTYPE_DEFAULT)
+        {
+            lua->unregister_group(pgroup);
+            groups.erase(pgroup);
+            delete pgroup;
+        }
+    }
+    sgroups.clear();
 }
-void duel::write_buffer(const void* data, size_t size) {
-	vector_write_block(message_buffer, data, size);
+void duel::restore_assumes()
+{
+    for (auto &pcard : assumes)
+        pcard->assume_type = 0;
+    assumes.clear();
 }
-void duel::write_buffer32(uint32_t value) {
-	vector_write<uint32_t>(message_buffer, value);
+void duel::write_buffer(const void *data, size_t size)
+{
+    vector_write_block(message_buffer, data, size);
 }
-void duel::write_buffer16(uint16_t value) {
-	vector_write<uint16_t>(message_buffer, value);
+void duel::write_buffer32(uint32_t value)
+{
+    vector_write<uint32_t>(message_buffer, value);
 }
-void duel::write_buffer8(uint8_t value) {
-	vector_write<unsigned char>(message_buffer, value);
+void duel::write_buffer16(uint16_t value)
+{
+    vector_write<uint16_t>(message_buffer, value);
 }
-void duel::clear_buffer() {
-	message_buffer.clear();
+void duel::write_buffer8(uint8_t value)
+{
+    vector_write<unsigned char>(message_buffer, value);
 }
-void duel::set_responsei(int32_t resp) {
-	game_field->returns.ivalue[0] = resp;
+void duel::clear_buffer()
+{
+    message_buffer.clear();
 }
-void duel::set_responseb(byte* resp) {
-	std::memcpy(game_field->returns.bvalue, resp, SIZE_RETURN_VALUE);
+void duel::set_responsei(int32_t resp)
+{
+    game_field->returns.ivalue[0] = resp;
 }
-int32_t duel::get_next_integer(int32_t l, int32_t h) {
-	if (rng_version == 1)
-		return random.get_random_integer_v1(l, h);
-	return random.get_random_integer_v2(l, h);
+void duel::set_responseb(byte *resp)
+{
+    std::memcpy(game_field->returns.bvalue, resp, SIZE_RETURN_VALUE);
+}
+int32_t duel::get_next_integer(int32_t l, int32_t h)
+{
+    if (rng_version == 1)
+        return random.get_random_integer_v1(l, h);
+    return random.get_random_integer_v2(l, h);
 }

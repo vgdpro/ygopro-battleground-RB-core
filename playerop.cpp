@@ -30,6 +30,11 @@ bool field::check_response(size_t vector_size, int32_t min_len, int32_t max_len)
 }
 int32_t field::select_battle_command(uint16_t step, uint8_t playerid) {
 	if(step == 0) {
+		if(playerid == 1) {
+			// 不发动效果/不攻击，直接进 M2 或 EP
+			returns.ivalue[0] = core.to_m2 ? 2 : 3;
+			return TRUE;
+		}
 		pduel->write_buffer8(MSG_SELECT_BATTLECMD);
 		pduel->write_buffer8(playerid);
 		//Activatable
@@ -82,6 +87,11 @@ int32_t field::select_battle_command(uint16_t step, uint8_t playerid) {
 }
 int32_t field::select_idle_command(uint16_t step, uint8_t playerid) {
 	if(step == 0) {
+		if(playerid == 1) {
+			// 不操作，直接进 BP 或 EP
+			returns.ivalue[0] = (infos.phase == PHASE_MAIN1 && core.to_bp) ? 6 : 7;
+			return TRUE;
+		}
 		pduel->write_buffer8(MSG_SELECT_IDLECMD);
 		pduel->write_buffer8(playerid);
 		//idle summon
@@ -530,6 +540,18 @@ int32_t field::select_tribute(uint16_t step, uint8_t playerid, uint8_t cancelabl
 			max = tm;
 		if(min > max)
 			min = max;
+		if(playerid == 1) {
+			// 选祭品，保证满足 min 需求（考虑 release_param）
+			uint8_t selected_cards = 0;
+			uint8_t total_release = 0;
+			for(uint8_t i = 0; i < (uint8_t)core.select_cards.size() && total_release < min; ++i) {
+				returns.bvalue[i + 1] = i;
+				++selected_cards;
+				total_release += core.select_cards[i]->release_param;
+			}
+			returns.bvalue[0] = selected_cards;
+			return TRUE;
+		}
 		core.units.begin()->arg2 = ((uint32_t)min) + (((uint32_t)max) << 16);
 		pduel->write_buffer8(MSG_SELECT_TRIBUTE);
 		pduel->write_buffer8(playerid);
@@ -605,6 +627,17 @@ int32_t field::select_counter(uint16_t step, uint8_t playerid, uint16_t countert
 			pduel->write_buffer8(MSG_RETRY);
 			return FALSE;
 		}
+		if(playerid == 1) {
+			// 依次从每张卡取指示物直到取够 count
+			uint16_t remaining = count;
+			for(uint16_t i = 0; i < (uint16_t)core.select_cards.size() && remaining > 0; ++i) {
+				uint16_t take = core.select_cards[i]->get_counter(countertype);
+				if(take > remaining) take = remaining;
+				returns.svalue[i] = (int16_t)take;
+				remaining -= take;
+			}
+			return TRUE;
+		}
 		pduel->write_buffer8(MSG_SELECT_COUNTER);
 		pduel->write_buffer8(playerid);
 		pduel->write_buffer16(countertype);
@@ -658,6 +691,22 @@ int32_t field::select_with_sum_limit(int16_t step, uint8_t playerid, int32_t acc
 			core.select_cards.resize(UINT8_MAX);
 		if (core.must_select_cards.size() > UINT8_MAX)
 			core.must_select_cards.resize(UINT8_MAX);
+		if(playerid == 1) {
+			uint8_t mcount = (uint8_t)core.must_select_cards.size();
+			uint8_t scount = (uint8_t)core.select_cards.size();
+			if(max) {
+				// 求和模式: 选 must_select + 最多 max 张可选卡
+				// 选更多卡只会增加子集可能性，select_sum_check1 一定通过
+				uint8_t take = (scount < (uint8_t)max) ? scount : (uint8_t)max;
+				returns.bvalue[0] = mcount + take;
+				for(uint8_t i = 0; i < take; ++i)
+					returns.bvalue[mcount + 1 + i] = i;
+			} else {
+				// 最小值模式: 只能选 must_select 卡 (returns.bvalue[0] 必须等于 mcount)
+				returns.bvalue[0] = mcount;
+			}
+			return TRUE;
+		}
 		pduel->write_buffer8(MSG_SELECT_SUM);
 		if(max)
 			pduel->write_buffer8(0);
@@ -749,7 +798,6 @@ int32_t field::select_with_sum_limit(int16_t step, uint8_t playerid, int32_t acc
 			return TRUE;
 		}
 	}
-	return TRUE;
 }
 int32_t field::sort_card(int16_t step, uint8_t playerid) {
 	if(step == 0) {
@@ -787,7 +835,6 @@ int32_t field::sort_card(int16_t step, uint8_t playerid) {
 		}
 		return TRUE;
 	}
-	return TRUE;
 }
 int32_t field::announce_race(int16_t step, uint8_t playerid, int32_t count, int32_t available) {
 	if(step == 0) {
@@ -799,6 +846,19 @@ int32_t field::announce_race(int16_t step, uint8_t playerid, int32_t count, int3
 		if(scount <= count) {
 			count = scount;
 			core.units.begin()->arg1 = (count << 16) + playerid;
+		}
+		if(playerid == 1) {
+			// 选 count 个可用种族（确保 step1 的 sel != count 不触发）
+			int32_t result = 0;
+			int32_t selected = 0;
+			for(uint32_t ft = 0x1; ft < (0x1U << RACES_COUNT) && selected < count; ft <<= 1) {
+				if(ft & available) {
+					result |= (int32_t)ft;
+					++selected;
+				}
+			}
+			returns.ivalue[0] = result;
+			return TRUE;
 		}
 		pduel->write_buffer8(MSG_ANNOUNCE_RACE);
 		pduel->write_buffer8(playerid);
@@ -827,7 +887,6 @@ int32_t field::announce_race(int16_t step, uint8_t playerid, int32_t count, int3
 		pduel->write_buffer32(returns.ivalue[0]);
 		return TRUE;
 	}
-	return TRUE;
 }
 int32_t field::announce_attribute(int16_t step, uint8_t playerid, int32_t count, int32_t available) {
 	if(step == 0) {
@@ -839,6 +898,19 @@ int32_t field::announce_attribute(int16_t step, uint8_t playerid, int32_t count,
 		if(scount <= count) {
 			count = scount;
 			core.units.begin()->arg1 = (count << 16) + playerid;
+		}
+		if(playerid == 1) {
+			// 选 count 个可用属性（确保 step1 的 sel != count 不触发）
+			int32_t result = 0;
+			int32_t selected = 0;
+			for(int32_t ft = 0x1; ft != 0x80 && selected < count; ft <<= 1) {
+				if(ft & available) {
+					result |= ft;
+					++selected;
+				}
+			}
+			returns.ivalue[0] = result;
+			return TRUE;
 		}
 		pduel->write_buffer8(MSG_ANNOUNCE_ATTRIB);
 		pduel->write_buffer8(playerid);
@@ -866,7 +938,6 @@ int32_t field::announce_attribute(int16_t step, uint8_t playerid, int32_t count,
 		pduel->write_buffer32(returns.ivalue[0]);
 		return TRUE;
 	}
-	return TRUE;
 }
 static int32_t is_declarable(const card_data& cd, const std::vector<uint32_t>& opcode) {
 	if (cd.alias)
@@ -1005,6 +1076,14 @@ static int32_t is_declarable(const card_data& cd, const std::vector<uint32_t>& o
 }
 int32_t field::announce_card(int16_t step, uint8_t playerid) {
 	if(step == 0) {
+		if(playerid == 1) {
+			// 选第一个可用的卡名
+			if(!core.select_options.empty())
+				returns.ivalue[0] = (int32_t)core.select_options[0];
+			else
+				returns.ivalue[0] = 0;
+			return TRUE;
+		}
 		pduel->write_buffer8(MSG_ANNOUNCE_CARD);
 		pduel->write_buffer8(playerid);
 		pduel->write_buffer8((uint8_t)core.select_options.size());
@@ -1030,10 +1109,14 @@ int32_t field::announce_card(int16_t step, uint8_t playerid) {
 		pduel->write_buffer32(code);
 		return TRUE;
 	}
-	return TRUE;
 }
 int32_t field::announce_number(int16_t step, uint8_t playerid) {
 	if(step == 0) {
+		if(playerid == 1) {
+			// 选第一个可用选项
+			returns.ivalue[0] = 0;
+			return TRUE;
+		}
 		if (core.select_options.size() > UINT8_MAX)
 			core.select_options.resize(UINT8_MAX);
 		pduel->write_buffer8(MSG_ANNOUNCE_NUMBER);
