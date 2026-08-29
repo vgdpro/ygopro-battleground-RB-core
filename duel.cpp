@@ -27,14 +27,9 @@ duel::duel()
 }
 void duel::init_fields()
 {
-    for (int i = 0; i < FIELD_COUNT; ++i){
-        fields[i] = new field(this);
-        fields[i]->temp_card = new_card(TEMP_CARD_ID);
-    }
+    for (int i = 0; i < FIELD_COUNT; ++i)
+        init_field(i);
     game_field = fields[0];
-    fprintf(stderr, "[DEBUG] init_fields: fields[0]=%p temp_card=%p\n", (void *)fields[0], (void *)fields[0]->temp_card);
-    fprintf(stderr, "[DEBUG] init_fields: fields[1]=%p temp_card=%p (NULL=bug)\n", (void *)fields[1], (void *)fields[1]->temp_card);
-    fprintf(stderr, "[DEBUG] init_fields: fields[2]=%p temp_card=%p (NULL=bug)\n", (void *)fields[2], (void *)fields[2]->temp_card);
 }
 duel::~duel()
 {
@@ -73,6 +68,9 @@ void duel::clear()
     assumes.clear();
     sgroups.clear();
     uncopy.clear();
+    next_card_id = 1;
+    for (int i = 0; i < BATTLE_FIELD_COUNT; ++i)
+        battle_field_bindings[i] = BattleFieldBinding{};
     init_fields();
 }
 card *duel::new_card(uint32_t code)
@@ -84,6 +82,117 @@ card *duel::new_card(uint32_t code)
     pcard->data.code = code;
     lua->register_card(pcard);
     return pcard;
+}
+void duel::init_field(uint8_t field_index)
+{
+    fields[field_index] = new field(this);
+    fields[field_index]->temp_card = new_card(TEMP_CARD_ID);
+    fields[field_index]->not_corpse[1] = false;
+}
+bool duel::is_home_field_index(uint8_t field_index)
+{
+    return field_index < HOME_FIELD_COUNT;
+}
+bool duel::is_battle_field_index(uint8_t field_index)
+{
+    return field_index >= HOME_FIELD_COUNT && field_index < FIELD_COUNT;
+}
+bool duel::is_battle_field(const field *pfield) const
+{
+    const uint8_t field_index = get_field_index(pfield);
+    return is_battle_field_index(field_index);
+}
+bool duel::is_corpse_player(const field *pfield, uint8_t playerid) const
+{
+    return playerid <= 1 && !pfield->not_corpse[playerid];
+}
+uint8_t duel::get_field_index(const field *pfield) const
+{
+    for (uint8_t field_index = 0; field_index < FIELD_COUNT; ++field_index)
+    {
+        if (fields[field_index] == pfield)
+            return field_index;
+    }
+    return INVALID_FIELD_INDEX;
+}
+bool duel::bind_battle_field(uint8_t battle_field, uint8_t home_field_p0, uint8_t home_field_p1)
+{
+    if (!is_battle_field_index(battle_field) || !is_home_field_index(home_field_p0) || !is_home_field_index(home_field_p1) || home_field_p0 == home_field_p1)
+        return false;
+    BattleFieldBinding &binding = battle_field_bindings[battle_field - HOME_FIELD_COUNT];
+    binding.home_fields[0] = home_field_p0;
+    binding.home_fields[1] = home_field_p1;
+    return true;
+}
+bool duel::reset_field(uint8_t field_index)
+{
+    if (!is_battle_field_index(field_index))
+        return false;
+    field *old_field = fields[field_index];
+    if (!old_field)
+        return false;
+    const bool was_active = game_field == old_field;
+    old_field->clear();
+    if (old_field->temp_card)
+        delete_card(old_field->temp_card);
+    delete old_field;
+    init_field(field_index);
+    battle_field_bindings[field_index - HOME_FIELD_COUNT] = BattleFieldBinding{};
+    if (was_active)
+        game_field = fields[field_index];
+    return true;
+}
+card *duel::clone_card_to_field(card *src, uint8_t dst_player,
+                                uint8_t location, uint8_t seq, uint8_t pos, uint8_t battle_field)
+{
+    if (!src || !is_battle_field_index(battle_field) || dst_player > 1)
+        return nullptr;
+    auto *pf = fields[battle_field];
+    if (pf->is_location_useable(dst_player, location, seq))
+    {
+        card *pcard = new_card(src->data.code);
+        pcard->owner = dst_player == 1 ? 1-src->owner : src->owner;
+        pf->add_card(dst_player, pcard, location, seq);
+        pcard->current.position = pos;
+        pcard->home_origin = src;
+        // 克隆超量素材：素材卡处于 LOCATION_OVERLAY，不属于任何区域向量，随怪兽一并克隆
+        for (auto &mat : src->xyz_materials)
+        {
+            card *mcard = new_card(mat->data.code);
+            mcard->owner = dst_player == 1 ? 1-mat->owner : mat->owner; // 克隆素材的控制权与原素材相同
+            mcard->home_origin = mat;
+            mcard->current.controler = PLAYER_NONE;
+            mcard->current.location = LOCATION_OVERLAY;
+            mcard->current.sequence = (uint8_t)pcard->xyz_materials.size();
+            mcard->overlay_target = pcard;
+            pcard->xyz_materials.push_back(mcard);
+        }
+        return pcard;
+    }
+    // 不克隆 effect，不调用 enable_field_effect / adjust_all
+    return nullptr;
+}
+bool duel::return_field_to_main(uint8_t battle_field)
+{
+    if (!is_battle_field_index(battle_field))
+        return false;
+    const BattleFieldBinding &binding = battle_field_bindings[battle_field - HOME_FIELD_COUNT];
+    const uint8_t home_field_p0 = binding.home_fields[0];
+    const uint8_t home_field_p1 = binding.home_fields[1];
+    if (!is_home_field_index(home_field_p0) || !is_home_field_index(home_field_p1))
+        return false;
+    field *battle = fields[battle_field];
+    field *home_p0 = fields[home_field_p0];
+    field *home_p1 = fields[home_field_p1];
+    // 将活人侧 LP 按绑定关系镜像回家园场（尸体侧不写回，死血写回 23333）
+    for (int player = 0; player < 2; ++player)
+    {
+        if (battle->not_corpse[0])
+            home_p0->player[player].lp = (battle->player[player].lp > 0) ? battle->player[player].lp : CORPSE_PLAYER_LP;
+        if (battle->not_corpse[1])
+            home_p1->player[player].lp = (battle->player[1 - player].lp > 0) ? battle->player[1 - player].lp : CORPSE_PLAYER_LP;
+    }
+    return true;
 }
 group *duel::register_group(group *pgroup)
 {
@@ -131,6 +240,7 @@ void duel::delete_group(group *pgroup)
 void duel::delete_effect(effect *peffect)
 {
     lua->unregister_effect(peffect);
+    uncopy.erase(peffect);
     effects.erase(peffect);
     delete peffect;
 }

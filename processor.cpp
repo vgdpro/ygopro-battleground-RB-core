@@ -93,7 +93,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -106,7 +106,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -119,7 +119,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -132,7 +132,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -145,7 +145,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -158,7 +158,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -171,7 +171,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -184,7 +184,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -198,7 +198,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -211,7 +211,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -224,7 +224,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -237,7 +237,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -250,7 +250,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -263,7 +263,7 @@ uint32_t field::process()
         }
         else
         {
-            it->step = 1;
+            ++it->step;
             return PROCESSOR_WAITING | pduel->buffer_size();
         }
     }
@@ -2950,7 +2950,7 @@ int32_t field::process_battle_command(uint16_t step)
             if (first_attack.size())
                 core.attackable_cards = first_attack;
         }
-        core.to_m2 = TRUE;
+        core.to_m2 = FALSE;
         core.to_ep = TRUE;
         if (must_attack.size() || is_player_affected_by_effect(infos.turn_player, EFFECT_CANNOT_M2))
             core.to_m2 = FALSE;
@@ -4342,7 +4342,8 @@ int32_t field::process_start(uint16_t step)
         // 从 duel 层级同步 player_info
         for (int32_t i = 0; i < 2; ++i)
         {
-            if(pduel->game_field != pduel->fields[2]){
+            if (!pduel->is_battle_field(pduel->game_field))
+            {
                 player[i].lp = pduel->start_lp[i];
             }
             player[i].start_count = pduel->start_hand[i];
@@ -4391,6 +4392,7 @@ int32_t field::process_start(uint16_t step)
         }
         // 通知 gframe 初始化完成
         pduel->write_buffer8(MSG_FIELD_READY);
+        pduel->write_buffer8(infos.turn_player);
         pduel->write_buffer8(player[0].lp);
         pduel->write_buffer8(player[1].lp);
         return TRUE;
@@ -4486,7 +4488,7 @@ int32_t field::process_turn(uint16_t step, uint8_t turn_player)
         ++infos.turn_id;
         ++infos.turn_id_by_player[turn_player];
         infos.turn_player = turn_player;
-        if (pduel->game_field == pduel->fields[2])
+        if (pduel->is_battle_field(pduel->game_field))
         {
             core.units.begin()->step = 8;
             return false;
@@ -4540,7 +4542,14 @@ int32_t field::process_turn(uint16_t step, uint8_t turn_player)
     case 2:
     {
         // Draw, new ruling
-        draw(nullptr, REASON_RULE, turn_player, turn_player, 5);//测试抽牌
+        draw(nullptr, REASON_RULE, turn_player, turn_player, 5); // 测试抽牌
+        // 测试发消息
+        pduel->write_buffer8(MSG_CUSTOM_CHAT);
+        pduel->write_buffer8(0);
+        pduel->write_buffer8(2);
+        pduel->write_buffer16(562);
+        pduel->write_buffer16(573);
+
         if ((core.duel_rule <= 2) || (infos.turn_id > 1))
         {
             int32_t count = get_draw_count(infos.turn_player);
@@ -4612,7 +4621,7 @@ int32_t field::process_turn(uint16_t step, uint8_t turn_player)
     case 8:
     {
         pduel->write_buffer8(MSG_CHANGE_FIELD);
-        core.units.begin()->step = 14;//End Phase
+        core.units.begin()->step = 14; // End Phase
         return FALSE;
     }
     case 9:
@@ -4655,7 +4664,7 @@ int32_t field::process_turn(uint16_t step, uint8_t turn_player)
     }
     case 11:
     {
-        if (pduel->game_field == pduel->fields[2])
+        if (pduel->is_battle_field(pduel->game_field))
         {
             infos.phase = PHASE_BATTLE_STEP;
             core.new_fchain.clear();
@@ -4731,8 +4740,9 @@ int32_t field::process_turn(uint16_t step, uint8_t turn_player)
     }
     case 15:
     {
-        //BP结束后各自的field从这里开始，所以在这里增加一个刷新客户端场地的请求
+        // BP结束后各自的field从这里开始，所以在这里增加一个刷新客户端场地的请求
         pduel->write_buffer8(MSG_FIELD_READY);
+        pduel->write_buffer8(infos.turn_player);
         pduel->write_buffer8(player[0].lp);
         pduel->write_buffer8(player[1].lp);
         // End Phase

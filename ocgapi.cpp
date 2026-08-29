@@ -20,12 +20,17 @@ static uint32_t default_card_reader(uint32_t code, card_data *data)
 {
     return 0;
 }
+static uint32_t default_random_card_reader(uint64_t capability, uint32_t count, uint32_t random_seed, uint32_t *codes)
+{
+    return 0;
+}
 static uint32_t default_message_handler(intptr_t pduel, uint32_t message_type)
 {
     return 0;
 }
 static script_reader sreader = default_script_reader;
 static card_reader creader = default_card_reader;
+static random_card_reader random_creader = default_random_card_reader;
 static message_handler mhandler = default_message_handler;
 static byte buffer[0x100000];
 static std::set<duel *> duel_set;
@@ -37,6 +42,10 @@ OCGCORE_API void set_script_reader(script_reader f)
 OCGCORE_API void set_card_reader(card_reader f)
 {
     creader = f;
+}
+OCGCORE_API void set_random_card_reader(random_card_reader f)
+{
+    random_creader = f ? f : default_random_card_reader;
 }
 OCGCORE_API void set_message_handler(message_handler f)
 {
@@ -104,30 +113,80 @@ OCGCORE_API void start_duel(intptr_t pduel, uint32_t options)
 
     pd->duel_options = duel_options;
 
-    // 向 fields[0]/[1] 各推 PROCESSOR_START + PROCESSOR_TURN
-    for (int i = 0; i < 2; ++i)
+    // 向全部家园场各推 PROCESSOR_START + PROCESSOR_TURN
+    for (int i = 0; i < duel::HOME_FIELD_COUNT; ++i)
     {
         pd->fields[i]->add_process(PROCESSOR_START, 0, 0, 0, 0, 0);
         pd->fields[i]->add_process(PROCESSOR_TURN, 0, 0, 0, 0, 0);
     }
 }
-OCGCORE_API void merge_field_to_bp(intptr_t pduel){
+OCGCORE_API uint32_t get_random_card(intptr_t pduel, uint64_t capability, uint32_t count, uint32_t *codes)
+{
+    if (!pduel || !count || !codes)
+        return 0;
     duel *pd = (duel *)pduel;
-    // 步骤1: 清理旧战斗场的卡牌和效果
-    pd->fields[2]->clear();
-    // 步骤2: 释放旧 field 对象，创建全新的 field
-    delete pd->fields[2];
-    pd->fields[2] = new field(pd);
-    // 步骤3: 无条件设置 temp_card
-    pd->fields[2]->temp_card = pd->new_card(TEMP_CARD_ID);
-    // 步骤4: 从家园场同步 LP
-    pd->fields[2]->player[0].lp = pd->fields[0]->player[0].lp;
-    pd->fields[2]->player[1].lp = pd->fields[1]->player[0].lp;
-    // 步骤5: 切换活跃场
-    pd->game_field = pd->fields[2];
-    // 步骤6: 推送处理器
-    pd->fields[2]->add_process(PROCESSOR_START, 0, 0, 0, 0, 0);
-    pd->fields[2]->add_process(PROCESSOR_TURN, 0, 0, 0, 0, 0);
+    return random_creader(capability, count, (uint32_t)pd->random.rand(), codes);
+}
+// 克隆家园场指定 field 的所有卡牌到战斗场
+// 遍历 7 个区域：DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA
+static void clone_field_cards(duel *pd, uint8_t battle_field, uint8_t home_field, uint8_t src_player, uint8_t dst_player)
+{
+    static const uint8_t locations[] = {
+        LOCATION_DECK, LOCATION_HAND, LOCATION_MZONE, LOCATION_SZONE,
+        LOCATION_GRAVE, LOCATION_REMOVED, LOCATION_EXTRA};
+    for (uint8_t loc : locations)
+    {
+        const card_vector *vec = pd->fields[home_field]->get_field_vector(src_player, loc);
+        if (!vec)
+            continue;
+        // DECK/EXTRA 使用 SEQ_DECKTOP(0) 保持顺序；其他区域保留原位置
+        for (size_t si = 0; si < vec->size(); ++si)
+        {
+            card *pcard = (*vec)[si];
+            if (!pcard || pcard->owner != src_player)
+                continue;
+            uint8_t seq = (loc == LOCATION_DECK || loc == LOCATION_EXTRA) ? 0 : (uint8_t)si;
+            uint8_t pos = pcard->current.position;
+            pd->clone_card_to_field(pcard, dst_player, loc, seq, pos, battle_field);
+        }
+    }
+}
+
+OCGCORE_API int32_t merge_field_to_bp(intptr_t pduel, uint8_t battle_field,
+                                      uint8_t home_field_p0, uint8_t home_field_p1, uint8_t turn_player)
+{
+    duel *pd = (duel *)pduel;
+    if (!pd || turn_player > 1 || !duel::is_battle_field_index(battle_field) || !duel::is_home_field_index(home_field_p0) || !duel::is_home_field_index(home_field_p1) || home_field_p0 == home_field_p1)
+        return FALSE;
+    if (!pd->reset_field(battle_field) || !pd->bind_battle_field(battle_field, home_field_p0, home_field_p1))
+        return FALSE;
+    // 从家园场同步 LP
+    pd->fields[battle_field]->player[0].lp = !pd->fields[home_field_p0]->not_corpse[0] ? CORPSE_PLAYER_LP : pd->fields[home_field_p0]->player[0].lp;
+    pd->fields[battle_field]->player[1].lp = !pd->fields[home_field_p1]->not_corpse[0] ? CORPSE_PLAYER_LP : pd->fields[home_field_p1]->player[0].lp;
+    pd->fields[battle_field]->not_corpse[0] = pd->fields[home_field_p0]->not_corpse[0];
+    pd->fields[battle_field]->not_corpse[1] = pd->fields[home_field_p1]->not_corpse[0];
+    // 克隆双方家园场卡牌到战斗场（仅卡牌本身，不克隆效果/属性/XYZ 素材）
+    clone_field_cards(pd, battle_field, home_field_p0, 0, 0);
+    clone_field_cards(pd, battle_field, home_field_p1, 0, 1);
+    // pd->game_field = pd->fields[battle_field];
+    //  设置先手玩家并推送处理器
+    pd->fields[battle_field]->infos.turn_player = 0;
+    pd->fields[battle_field]->add_process(PROCESSOR_START, 0, 0, 0, 0, 0, 0);
+    pd->fields[battle_field]->add_process(PROCESSOR_TURN, 0, 0, 0, turn_player, 0, 0);
+    return TRUE;
+}
+OCGCORE_API void set_player_corpse(intptr_t pduel, uint8_t fieldid, uint8_t playerid)
+{
+    duel *pd = (duel *)pduel;
+    pd->fields[fieldid]->player[playerid].lp = CORPSE_PLAYER_LP;
+    pd->fields[fieldid]->not_corpse[playerid] = false;
+}
+OCGCORE_API int32_t return_field_to_main(intptr_t pduel, uint8_t battle_field)
+{
+    duel *pd = (duel *)pduel;
+    if (!pd)
+        return FALSE;
+    return pd->return_field_to_main(battle_field) ? TRUE : FALSE;
 }
 OCGCORE_API void end_duel(intptr_t pduel)
 {
@@ -165,9 +224,7 @@ OCGCORE_API int32_t get_message(intptr_t pduel, byte *buf)
 OCGCORE_API uint32_t process(intptr_t pduel)
 {
     duel *pd = (duel *)pduel;
-    int field_idx = (pd->game_field == pd->fields[0]) ? 0 : (pd->game_field == pd->fields[1]) ? 1 : 2;
-    fprintf(stderr, "[DEBUG] process() field[%d] game_field=%p temp_card=%p\n", field_idx, (void *)pd->game_field, (void *)pd->game_field->temp_card);
-    fflush(stderr);
+    int field_idx = pd->get_field_index(pd->game_field);
     uint32_t result = 0;
     do
     {
@@ -436,9 +493,15 @@ OCGCORE_API void set_active_field(intptr_t pduel, uint8_t field_idx)
     duel *pd = (duel *)pduel;
     if (field_idx < pd->FIELD_COUNT)
     {
-        int old_idx = (pd->game_field == pd->fields[0]) ? 0 : (pd->game_field == pd->fields[1]) ? 1
-                                                                                                : 2;
+        int old_idx = pd->get_field_index(pd->game_field);
+        // 保存旧 field 的 PendulumChecklist（从 Lua 全局读回，包含脚本的修改）
+        if (old_idx < pd->FIELD_COUNT)
+            pd->fields[old_idx]->infos.pendulum_checklist =
+                pd->lua->get_global_int("Auxiliary", "PendulumChecklist");
         pd->game_field = pd->fields[field_idx];
+        // 恢复新 field 的 PendulumChecklist（写入 Lua 全局）
+        pd->lua->set_global_int("Auxiliary", "PendulumChecklist",
+            pd->fields[field_idx]->infos.pendulum_checklist);
         fprintf(stderr, "[DEBUG] set_active_field: %d->%d new game_field=%p temp_card=%p\n", old_idx, (int)field_idx, (void *)pd->game_field, (void *)pd->game_field->temp_card);
     }
 }

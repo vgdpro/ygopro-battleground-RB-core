@@ -66,6 +66,8 @@ public:
 
 	int32_t load_script(const char* script_name);
 	int32_t load_card_script(uint32_t code);
+	int32_t get_global_int(const char* table, const char* key);
+	void set_global_int(const char* table, const char* key, int32_t val);
 	void add_param(void* param, LuaParamType type, bool front = false);
 	void add_param(int32_t param, LuaParamType type, bool front = false);
 	void push_param(lua_State* L, bool is_coroutine = false);

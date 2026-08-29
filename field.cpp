@@ -71,75 +71,99 @@ field::field(duel *pd)
 }
 void field::clear()
 {
-	// 收集所有属于本 field 的卡牌指针
-	card_set field_cards;
-	for (int p = 0; p < 2; ++p)
-	{
-		for (auto &pc : player[p].list_mzone)
-			if (pc)
-			{
-				field_cards.insert(pc);
-				// 收集超量素材（不在任何 zone 中）
-				for (auto &mat : pc->xyz_materials)
-					field_cards.insert(mat);
-			}
-		for (auto &pc : player[p].list_szone)
-			if (pc)
-				field_cards.insert(pc);
-		for (auto &pc : player[p].list_hand)
-			field_cards.insert(pc);
-		for (auto &pc : player[p].list_main)
-			field_cards.insert(pc);
-		for (auto &pc : player[p].list_grave)
-			field_cards.insert(pc);
-		for (auto &pc : player[p].list_remove)
-			field_cards.insert(pc);
-		for (auto &pc : player[p].list_extra)
-			field_cards.insert(pc);
-		for (auto &pc : player[p].tag_list_main)
-			field_cards.insert(pc);
-		for (auto &pc : player[p].tag_list_hand)
-			field_cards.insert(pc);
-		for (auto &pc : player[p].tag_list_extra)
-			field_cards.insert(pc);
-	}
+    // 收集所有属于本 field 的卡牌指针
+    card_set field_cards;
+    for (int p = 0; p < 2; ++p)
+    {
+        for (auto &pc : player[p].list_mzone)
+            if (pc)
+            {
+                field_cards.insert(pc);
+                // 收集超量素材（不在任何 zone 中）
+                for (auto &mat : pc->xyz_materials)
+                    field_cards.insert(mat);
+            }
+        for (auto &pc : player[p].list_szone)
+            if (pc)
+                field_cards.insert(pc);
+        for (auto &pc : player[p].list_hand)
+            field_cards.insert(pc);
+        for (auto &pc : player[p].list_main)
+            field_cards.insert(pc);
+        for (auto &pc : player[p].list_grave)
+            field_cards.insert(pc);
+        for (auto &pc : player[p].list_remove)
+            field_cards.insert(pc);
+        for (auto &pc : player[p].list_extra)
+            field_cards.insert(pc);
+        for (auto &pc : player[p].tag_list_main)
+            field_cards.insert(pc);
+        for (auto &pc : player[p].tag_list_hand)
+            field_cards.insert(pc);
+        for (auto &pc : player[p].tag_list_extra)
+            field_cards.insert(pc);
+    }
 
-	// 清空所有 zone
-	for (int p = 0; p < 2; ++p)
-	{
-		// 固定大小的 zone 重置为 nullptr
-		player[p].list_mzone.assign(7, nullptr);
-		player[p].list_szone.assign(8, nullptr);
-		// 动态 zone 清空
-		player[p].list_hand.clear();
-		player[p].list_main.clear();
-		player[p].list_grave.clear();
-		player[p].list_remove.clear();
-		player[p].list_extra.clear();
-		player[p].tag_list_main.clear();
-		player[p].tag_list_hand.clear();
-		player[p].tag_list_extra.clear();
-	}
+    // 清空所有 zone
+    for (int p = 0; p < 2; ++p)
+    {
+        // 固定大小的 zone 重置为 nullptr
+        player[p].list_mzone.assign(7, nullptr);
+        player[p].list_szone.assign(8, nullptr);
+        // 动态 zone 清空
+        player[p].list_hand.clear();
+        player[p].list_main.clear();
+        player[p].list_grave.clear();
+        player[p].list_remove.clear();
+        player[p].list_extra.clear();
+        player[p].tag_list_main.clear();
+        player[p].tag_list_hand.clear();
+        player[p].tag_list_extra.clear();
+    }
 
-	// 删除 owner 或 handler 属于本 field 卡牌的所有 effect
-	{
-		auto it = pduel->effects.begin();
-		while (it != pduel->effects.end())
-		{
-			effect *pe = *it;
-			++it;
-			if (field_cards.count(pe->owner) || field_cards.count(pe->handler))
-				pduel->delete_effect(pe);
-		}
-	}
+    // 删除 owner 或 handler 属于本 field 卡牌的所有 effect
+    {
+        auto it = pduel->effects.begin();
+        while (it != pduel->effects.end())
+        {
+            effect *pe = *it;
+            ++it;
+            if (field_cards.count(pe->owner) || field_cards.count(pe->handler))
+                pduel->delete_effect(pe);
+        }
+    }
 
-	// 删除所有卡牌（Lua 反注册 + 从 duel::cards 移除 + delete）
-	for (auto &pc : field_cards)
-		pduel->delete_card(pc);
+    // 删除引用本 field 卡牌的 group，避免保留悬空指针
+    {
+        auto it = pduel->groups.begin();
+        while (it != pduel->groups.end())
+        {
+            group *pgroup = *it;
+            ++it;
+            bool references_field = false;
+            for (auto &pc : pgroup->container)
+            {
+                if (field_cards.count(pc))
+                {
+                    references_field = true;
+                    break;
+                }
+            }
+            if (references_field)
+                pduel->delete_group(pgroup);
+        }
+    }
 
-	// 重置 LP
-	player[0].lp = 0;
-	player[1].lp = 0;
+    // 删除所有卡牌（Lua 反注册 + 从 duel::cards 移除 + delete）
+    for (auto &pc : field_cards)
+    {
+        pduel->assumes.erase(pc);
+        pduel->delete_card(pc);
+    }
+
+    // 重置 LP
+    player[0].lp = 0;
+    player[1].lp = 0;
 }
 void field::reload_field_info()
 {

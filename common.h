@@ -257,6 +257,9 @@ inline bool check_playerid(int32_t playerid)
 // Messages
 #define MSG_RETRY 1
 #define MSG_HINT 2
+#define MSG_CUSTOM_CHAT 57
+#define MSG_BATTLEGROUND_FATAL 58
+#define BATTLEGROUND_FATAL_RETURN_FIELD 1
 // #define MSG_WAITING			3
 // #define MSG_START				4
 #define MSG_WIN 5

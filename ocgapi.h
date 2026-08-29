@@ -29,14 +29,18 @@
 #define LEN_HEADER 8
 #define TEMP_CARD_ID 0
 
+constexpr uint64_t CARD_CAPABILITY_SPECIAL_SUMMON = 1ULL << 0;
+
 struct card_data;
 
 typedef byte *(*script_reader)(const char *script_name, int *len);
 typedef uint32_t (*card_reader)(uint32_t code, card_data *data);
+typedef uint32_t (*random_card_reader)(uint64_t capability, uint32_t count, uint32_t random_seed, uint32_t *codes);
 typedef uint32_t (*message_handler)(intptr_t pduel, uint32_t msg_type);
 
 OCGCORE_API void set_script_reader(script_reader f);
 OCGCORE_API void set_card_reader(card_reader f);
+OCGCORE_API void set_random_card_reader(random_card_reader f);
 OCGCORE_API void set_message_handler(message_handler f);
 
 byte *read_script(const char *script_name, int *len);
@@ -46,6 +50,7 @@ uint32_t handle_message(void *pduel, uint32_t message_type);
 OCGCORE_API intptr_t create_duel(uint_fast32_t seed);
 OCGCORE_API intptr_t create_duel_v2(uint32_t seed_sequence[]);
 OCGCORE_API void start_duel(intptr_t pduel, uint32_t options);
+OCGCORE_API uint32_t get_random_card(intptr_t pduel, uint64_t capability, uint32_t count, uint32_t *codes);
 OCGCORE_API void end_duel(intptr_t pduel);
 OCGCORE_API void set_player_info(intptr_t pduel, int32_t playerid, int32_t lp, int32_t startcount, int32_t drawcount);
 OCGCORE_API void get_log_message(intptr_t pduel, char *buf);
@@ -62,6 +67,11 @@ OCGCORE_API void set_responseb(intptr_t pduel, byte *buf);
 OCGCORE_API void set_active_field(intptr_t pduel, uint8_t field_idx);
 OCGCORE_API int32_t preload_script(intptr_t pduel, const char *script_name);
 OCGCORE_API byte *default_script_reader(const char *script_name, int *len);
-OCGCORE_API void merge_field_to_bp(intptr_t pduel);
+constexpr uint8_t CORPSE_PLAYER_MASK = 0x3;
+constexpr int32_t CORPSE_PLAYER_LP = 23333;
+OCGCORE_API int32_t merge_field_to_bp(intptr_t pduel, uint8_t battle_field,
+                                      uint8_t home_field_p0, uint8_t home_field_p1, uint8_t turn_player);
+OCGCORE_API int32_t return_field_to_main(intptr_t pduel, uint8_t battle_field);
+OCGCORE_API void set_player_corpse(intptr_t pduel, uint8_t fieldid, uint8_t playerid);
 
 #endif /* OCGAPI_H_ */

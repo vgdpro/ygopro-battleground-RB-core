@@ -92,7 +92,7 @@ void interpreter::register_card(card *pcard)
         call_card_function(pcard, "initial_effect", 1, 0);
         pcard->set_status(STATUS_INITIALIZING, FALSE);
     }
-    pcard->cardid = pduel->fields[0]->infos.card_id++;
+    pcard->cardid = pduel->next_card_id++;
 }
 void interpreter::unregister_card(card *pcard)
 {
@@ -178,6 +178,23 @@ int32_t interpreter::load_script(const char *script_name)
     }
     --no_action;
     return OPERATION_SUCCESS;
+}
+// 读取全局表 table 的 key 字段（整数）
+int32_t interpreter::get_global_int(const char *table, const char *key)
+{
+    lua_getglobal(lua_state, table);   // +1 Auxiliary
+    lua_getfield(lua_state, -1, key);  // +1 Auxiliary.PendulumChecklist
+    int32_t val = (int32_t)lua_tointeger(lua_state, -1);
+    lua_pop(lua_state, 2);
+    return val;
+}
+// 写入全局表 table 的 key 字段（整数）
+void interpreter::set_global_int(const char *table, const char *key, int32_t val)
+{
+    lua_getglobal(lua_state, table);       // +1 Auxiliary
+    lua_pushinteger(lua_state, val);       // +1 val
+    lua_setfield(lua_state, -2, key);      // -2
+    lua_pop(lua_state, 1);                 // -1
 }
 // push table cxxx onto the stack of current_state
 int32_t interpreter::load_card_script(uint32_t code)

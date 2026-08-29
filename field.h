@@ -138,6 +138,7 @@ struct field_info
     uint8_t turn_player{};
     uint8_t priorities[2]{};
     uint8_t can_shuffle{TRUE};
+    int32_t pendulum_checklist{0};
 };
 struct lpcost
 {
@@ -374,6 +375,7 @@ class field
 public:
     duel *pduel{};
     player_info player[2];
+    bool not_corpse[2]{true, true};
     card *temp_card{};
     field_info infos;
     // lpcost cost[2];
@@ -385,11 +387,11 @@ public:
     static int32_t field_used_count[32];
     explicit field(duel *pd);
     ~field() = default;
-	void clear();
-	void reload_field_info();
+    void clear();
+    void reload_field_info();
 
-	void add_card(uint8_t playerid, card *pcard, uint8_t location, uint8_t sequence, uint8_t pzone = FALSE);
-	void remove_card(card *pcard);
+    void add_card(uint8_t playerid, card *pcard, uint8_t location, uint8_t sequence, uint8_t pzone = FALSE);
+    void remove_card(card *pcard);
     void move_card(uint8_t playerid, card *pcard, uint8_t location, uint8_t sequence, uint8_t pzone = FALSE);
     void swap_card(card *pcard1, card *pcard2, uint8_t new_sequence1, uint8_t new_sequence2);
     void swap_card(card *pcard1, card *pcard2);
