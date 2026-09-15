@@ -388,6 +388,7 @@ public:
     explicit field(duel *pd);
     ~field() = default;
     void clear();
+    uint32_t delete_cards(const card_set &targets);
     void reload_field_info();
 
     void add_card(uint8_t playerid, card *pcard, uint8_t location, uint8_t sequence, uint8_t pzone = FALSE);

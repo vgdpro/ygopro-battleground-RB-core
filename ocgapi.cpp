@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <unordered_map>
 #include "ocgapi.h"
 #include "duel.h"
 #include "card.h"
@@ -129,7 +130,9 @@ OCGCORE_API uint32_t get_random_card(intptr_t pduel, uint64_t capability, uint32
 }
 // 克隆家园场指定 field 的所有卡牌到战斗场
 // 遍历 7 个区域：DECK/HAND/MZONE/SZONE/GRAVE/REMOVED/EXTRA
-static void clone_field_cards(duel *pd, uint8_t battle_field, uint8_t home_field, uint8_t src_player, uint8_t dst_player)
+// card_map: 输出参数，记录源卡→克隆卡的映射，供后续效果克隆使用
+static void clone_field_cards(duel *pd, uint8_t battle_field, uint8_t home_field, uint8_t src_player, uint8_t dst_player,
+                              std::unordered_map<card *, card *> &card_map)
 {
     static const uint8_t locations[] = {
         LOCATION_DECK, LOCATION_HAND, LOCATION_MZONE, LOCATION_SZONE,
@@ -147,7 +150,14 @@ static void clone_field_cards(duel *pd, uint8_t battle_field, uint8_t home_field
                 continue;
             uint8_t seq = (loc == LOCATION_DECK || loc == LOCATION_EXTRA) ? 0 : (uint8_t)si;
             uint8_t pos = pcard->current.position;
-            pd->clone_card_to_field(pcard, dst_player, loc, seq, pos, battle_field);
+            card *cloned = pd->clone_card_to_field(pcard, dst_player, loc, seq, pos, battle_field);
+            if (cloned)
+            {
+                card_map[pcard] = cloned;
+                // 记录超量素材的映射
+                for (size_t mi = 0; mi < pcard->xyz_materials.size() && mi < cloned->xyz_materials.size(); ++mi)
+                    card_map[pcard->xyz_materials[mi]] = cloned->xyz_materials[mi];
+            }
         }
     }
 }
@@ -160,14 +170,44 @@ OCGCORE_API int32_t merge_field_to_bp(intptr_t pduel, uint8_t battle_field,
         return FALSE;
     if (!pd->reset_field(battle_field) || !pd->bind_battle_field(battle_field, home_field_p0, home_field_p1))
         return FALSE;
+    // 重置战斗场 Auxiliary.* per-field 变量为干净初始状态（M2.10）
+    // ExtraDeckSummonCountLimit → {0:1, 1:1}
+    {
+        lua_State *L = pd->lua->lua_state;
+        lua_getglobal(L, "Auxiliary"); // +1 Auxiliary
+        lua_newtable(L);               // +1 {}
+        lua_pushinteger(L, 1);
+        lua_setfield(L, -2, "0"); // [0]=1
+        lua_pushinteger(L, 1);
+        lua_setfield(L, -2, "1");                         // [1]=1
+        lua_setfield(L, -2, "ExtraDeckSummonCountLimit"); // -2
+        lua_pop(L, 1);                                    // -1
+    }
+    // merge_single_effect_codes → {}
+    pd->lua->set_global_empty_table("Auxiliary", "merge_single_effect_codes");
+    // SubGroupCaptured → nil
+    pd->lua->set_global_nil("Auxiliary", "SubGroupCaptured");
     // 从家园场同步 LP
     pd->fields[battle_field]->player[0].lp = !pd->fields[home_field_p0]->not_corpse[0] ? CORPSE_PLAYER_LP : pd->fields[home_field_p0]->player[0].lp;
     pd->fields[battle_field]->player[1].lp = !pd->fields[home_field_p1]->not_corpse[0] ? CORPSE_PLAYER_LP : pd->fields[home_field_p1]->player[0].lp;
     pd->fields[battle_field]->not_corpse[0] = pd->fields[home_field_p0]->not_corpse[0];
     pd->fields[battle_field]->not_corpse[1] = pd->fields[home_field_p1]->not_corpse[0];
-    // 克隆双方家园场卡牌到战斗场（仅卡牌本身，不克隆效果/属性/XYZ 素材）
-    clone_field_cards(pd, battle_field, home_field_p0, 0, 0);
-    clone_field_cards(pd, battle_field, home_field_p1, 0, 1);
+    // 克隆双方家园场卡牌到战斗场（不注册效果，效果由 clone_effects_to_field 一比一复制）
+    std::unordered_map<card *, card *> card_map;
+    clone_field_cards(pd, battle_field, home_field_p0, 0, 0, card_map);
+    clone_field_cards(pd, battle_field, home_field_p1, 0, 1, card_map);
+    // 克隆所有效果到战斗场卡牌和 temp_card
+    pd->clone_effects_to_field(battle_field, home_field_p0, home_field_p1, card_map);
+    // 全量克隆所有 group 到战斗场，并建立双向绑定
+    pd->clone_groups_to_field(battle_field, card_map);
+    // 重映射 effect 额外属性（label_object/required_handorset_effects/active_handler/last_handler）
+    // 必须在 card/effect/group 全部克隆完毕后执行，因为 label_object 可能引用 group
+    pd->remap_effect_references(card_map);
+    // 重映射卡牌 B 组指针引用（equiping_target/material_cards/relations 等）和 unique_function
+    // 必须在 card/effect/group 全部克隆完毕后执行
+    pd->remap_card_references(card_map);
+    // 刷新战斗场连续效果
+    pd->fields[battle_field]->adjust_all();
     // pd->game_field = pd->fields[battle_field];
     //  设置先手玩家并推送处理器
     pd->fields[battle_field]->infos.turn_player = 0;
@@ -501,7 +541,58 @@ OCGCORE_API void set_active_field(intptr_t pduel, uint8_t field_idx)
         pd->game_field = pd->fields[field_idx];
         // 恢复新 field 的 PendulumChecklist（写入 Lua 全局）
         pd->lua->set_global_int("Auxiliary", "PendulumChecklist",
-            pd->fields[field_idx]->infos.pendulum_checklist);
+                                pd->fields[field_idx]->infos.pendulum_checklist);
+        // 快照/恢复 c{code}.* 守卫字段（M2.10：per-field 隔离）
+        for (auto &kv : pd->guard_states)
+        {
+            uint64_t key = kv.first;
+            uint8_t &mask = kv.second;
+            uint32_t code = (uint32_t)(key >> 8);
+            int fi = key & 0xff;
+            // 读回旧 field 的守卫值（从 Lua 全局）
+            char class_name[20];
+            sprintf(class_name, "c%d", code);
+            lua_getglobal(pd->lua->lua_state, class_name);                     // +1 c{code}
+            lua_getfield(pd->lua->lua_state, -1, duel::GUARD_FIELD_NAMES[fi]); // +1 value
+            bool current_val = lua_toboolean(pd->lua->lua_state, -1);
+            lua_pop(pd->lua->lua_state, 2); // -2
+            // 更新 mask 中旧 field 的 bit
+            if (current_val)
+                mask |= (1 << old_idx);
+            else
+                mask &= ~(1 << old_idx);
+            // 写入新 field 的守卫值到 Lua 全局
+            bool new_val = (mask >> field_idx) & 1;
+            lua_getglobal(pd->lua->lua_state, class_name);                     // +1 c{code}
+            lua_pushboolean(pd->lua->lua_state, new_val);                      // +1 bool
+            lua_setfield(pd->lua->lua_state, -2, duel::GUARD_FIELD_NAMES[fi]); // -1
+            lua_pop(pd->lua->lua_state, 1);                                    // -1
+        }
+        // 快照/恢复 Auxiliary.* 表/对象字段（M2.10：per-field 隔离）
+        for (int i = 0; i < duel::AUX_TABLE_FIELD_COUNT; ++i)
+        {
+            const char *name = duel::AUX_TABLE_FIELD_NAMES[i];
+            // 保存旧 field 的当前值到 registry ref
+            if (old_idx < pd->FIELD_COUNT)
+            {
+                if (pd->aux_table_refs[i][old_idx] != LUA_NOREF)
+                    pd->lua->free_global_ref(pd->aux_table_refs[i][old_idx]);
+                pd->aux_table_refs[i][old_idx] = pd->lua->save_global_ref("Auxiliary", name);
+            }
+            // 恢复新 field 的值
+            if (pd->aux_table_refs[i][field_idx] != LUA_NOREF)
+                pd->lua->restore_global_ref("Auxiliary", name, pd->aux_table_refs[i][field_idx]);
+            else
+                pd->lua->set_global_nil("Auxiliary", name);
+        }
+        // 快照/恢复 Auxiliary.* 布尔字段（M2.10：per-field 隔离）
+        for (int i = 0; i < duel::AUX_BOOL_FIELD_COUNT; ++i)
+        {
+            const char *name = duel::AUX_BOOL_FIELD_NAMES[i];
+            if (old_idx < pd->FIELD_COUNT)
+                pd->aux_bool_values[i][old_idx] = pd->lua->get_global_int("Auxiliary", name) ? 1 : 0;
+            pd->lua->set_global_int("Auxiliary", name, pd->aux_bool_values[i][field_idx]);
+        }
         fprintf(stderr, "[DEBUG] set_active_field: %d->%d new game_field=%p temp_card=%p\n", old_idx, (int)field_idx, (void *)pd->game_field, (void *)pd->game_field->temp_card);
     }
 }

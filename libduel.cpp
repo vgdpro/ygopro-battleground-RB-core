@@ -245,6 +245,36 @@ int32_t scriptlib::duel_destroy(lua_State *L)
 		lua_pushinteger(L, pduel->game_field->returns.ivalue[0]);
 		return 1; });
 }
+// Duel.DeleteCards(c) — 安全删除卡牌及其关联效果，只在处理器空闲时调用
+// 参数：Card 或 Group，返回删除数量
+int32_t scriptlib::duel_delete_cards(lua_State *L)
+{
+    check_action_permission(L);
+    check_param_count(L, 1);
+    card *pcard = nullptr;
+    group *pgroup = nullptr;
+    duel *pduel = nullptr;
+    if (check_param(L, PARAM_TYPE_CARD, 1, TRUE))
+    {
+        pcard = *(card **)lua_touserdata(L, 1);
+        pduel = pcard->pduel;
+    }
+    else if (check_param(L, PARAM_TYPE_GROUP, 1, TRUE))
+    {
+        pgroup = *(group **)lua_touserdata(L, 1);
+        pduel = pgroup->pduel;
+    }
+    else
+        return luaL_error(L, "Parameter %d should be \"Card\" or \"Group\".", 1);
+    card_set targets;
+    if (pcard)
+        targets.insert(pcard);
+    else
+        targets.insert(pgroup->container.begin(), pgroup->container.end());
+    uint32_t count = pduel->game_field->delete_cards(targets);
+    lua_pushinteger(L, count);
+    return 1;
+}
 int32_t scriptlib::duel_remove(lua_State *L)
 {
     check_action_permission(L);
@@ -5455,6 +5485,7 @@ static const struct luaL_Reg duellib[] = {
     {"SetFlagEffectLabel", scriptlib::duel_set_flag_effect_label},
     {"GetFlagEffectLabel", scriptlib::duel_get_flag_effect_label},
     {"Destroy", scriptlib::duel_destroy},
+    {"DeleteCards", scriptlib::duel_delete_cards},
     {"Remove", scriptlib::duel_remove},
     {"SendtoGrave", scriptlib::duel_sendto_grave},
     {"SendtoHand", scriptlib::duel_sendto_hand},

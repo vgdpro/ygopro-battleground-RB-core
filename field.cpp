@@ -121,14 +121,14 @@ void field::clear()
         player[p].tag_list_extra.clear();
     }
 
-    // 删除 owner 或 handler 属于本 field 卡牌的所有 effect
+    // 删除 owner 或 handler 属于本 field 卡牌的所有 effect（含 temp_card）
     {
         auto it = pduel->effects.begin();
         while (it != pduel->effects.end())
         {
             effect *pe = *it;
             ++it;
-            if (field_cards.count(pe->owner) || field_cards.count(pe->handler))
+            if (field_cards.count(pe->owner) || field_cards.count(pe->handler) || pe->owner == temp_card || pe->handler == temp_card)
                 pduel->delete_effect(pe);
         }
     }
@@ -164,6 +164,237 @@ void field::clear()
     // 重置 LP
     player[0].lp = 0;
     player[1].lp = 0;
+    // 清理战斗场 Auxiliary.* per-field Lua 全局变量，避免悬空引用（M2.10）
+    uint8_t fi = pduel->get_field_index(this);
+    if (duel::is_battle_field_index(fi))
+    {
+        pduel->lua->set_global_nil("Auxiliary", "merge_single_effect_codes");
+        pduel->lua->set_global_nil("Auxiliary", "SubGroupCaptured");
+    }
+}
+// 安全删除 field 中指定卡牌及其关联效果，只在处理器空闲时调用
+// 返回实际删除的卡牌数量
+uint32_t field::delete_cards(const card_set &targets)
+{
+    if (targets.empty())
+        return 0;
+    // 步骤 1：收集属于本 field 的待删卡牌，同时从 zone 向量中移除
+    card_set dead_cards;
+    bool affected_players[2] = {false, false};
+    // 从动态 zone 中移除 targets 中的卡牌（HAND/DECK/GRAVE/REMOVED 模式相同）
+    auto collect_from_dynamic_zone = [&](card_vector &zone, int p)
+    {
+        auto it = zone.begin();
+        while (it != zone.end())
+        {
+            if (targets.count(*it))
+            {
+                dead_cards.insert(*it);
+                it = zone.erase(it);
+                affected_players[p] = true;
+            }
+            else
+                ++it;
+        }
+    };
+    for (int p = 0; p < 2; ++p)
+    {
+        // MZONE（含超量素材）
+        for (size_t i = 0; i < player[p].list_mzone.size(); ++i)
+        {
+            card *pc = player[p].list_mzone[i];
+            if (pc && targets.count(pc))
+            {
+                dead_cards.insert(pc);
+                for (auto &mat : pc->xyz_materials)
+                    if (targets.count(mat))
+                        dead_cards.insert(mat);
+                player[p].list_mzone[i] = nullptr;
+                affected_players[p] = true;
+            }
+        }
+        // SZONE
+        for (size_t i = 0; i < player[p].list_szone.size(); ++i)
+        {
+            card *pc = player[p].list_szone[i];
+            if (pc && targets.count(pc))
+            {
+                dead_cards.insert(pc);
+                player[p].list_szone[i] = nullptr;
+                affected_players[p] = true;
+            }
+        }
+        collect_from_dynamic_zone(player[p].list_hand, p);
+        collect_from_dynamic_zone(player[p].list_main, p);
+        collect_from_dynamic_zone(player[p].list_grave, p);
+        collect_from_dynamic_zone(player[p].list_remove, p);
+        // EXTRA（需额外处理灵摆计数）
+        {
+            auto it = player[p].list_extra.begin();
+            while (it != player[p].list_extra.end())
+            {
+                if (targets.count(*it))
+                {
+                    dead_cards.insert(*it);
+                    if ((*it)->data.type & TYPE_PENDULUM && (*it)->current.position & POS_FACEUP)
+                        --player[p].extra_p_count;
+                    it = player[p].list_extra.erase(it);
+                    affected_players[p] = true;
+                }
+                else
+                    ++it;
+            }
+        }
+    }
+    if (dead_cards.empty())
+        return 0;
+    // 步骤 2：修复幸存卡牌对被删卡牌的交叉引用
+    auto erase_dead_from_card_set = [&](card_set &cset)
+    {
+        for (auto it = cset.begin(); it != cset.end();)
+        {
+            if (dead_cards.count(*it))
+                it = cset.erase(it);
+            else
+                ++it;
+        }
+    };
+    auto erase_dead_from_attacker_map = [&](card::attacker_map &amap)
+    {
+        for (auto it = amap.begin(); it != amap.end();)
+        {
+            if (dead_cards.count(it->second.first))
+                it = amap.erase(it);
+            else
+                ++it;
+        }
+    };
+    auto erase_dead_from_relations = [&](card *pc)
+    {
+        for (auto it = pc->relations.begin(); it != pc->relations.end();)
+        {
+            if (dead_cards.count(it->first))
+                it = pc->relations.erase(it);
+            else
+                ++it;
+        }
+    };
+    auto fix_single_ptr = [&](card *&ptr)
+    {
+        if (ptr && dead_cards.count(ptr))
+            ptr = nullptr;
+    };
+    for (int p = 0; p < 2; ++p)
+    {
+        for (auto &pc : player[p].list_mzone)
+        {
+            if (!pc || dead_cards.count(pc))
+                continue;
+            fix_single_ptr(pc->equiping_target);
+            fix_single_ptr(pc->pre_equip_target);
+            fix_single_ptr(pc->overlay_target);
+            erase_dead_from_card_set(pc->equiping_cards);
+            erase_dead_from_card_set(pc->material_cards);
+            erase_dead_from_card_set(pc->effect_target_owner);
+            erase_dead_from_card_set(pc->effect_target_cards);
+            // xyz_materials（card_vector，非 card_set）
+            for (auto it = pc->xyz_materials.begin(); it != pc->xyz_materials.end();)
+            {
+                if (dead_cards.count(*it))
+                    it = pc->xyz_materials.erase(it);
+                else
+                    ++it;
+            }
+            erase_dead_from_relations(pc);
+            erase_dead_from_attacker_map(pc->announced_cards);
+            erase_dead_from_attacker_map(pc->attacked_cards);
+            erase_dead_from_attacker_map(pc->battled_cards);
+        }
+        // SZONE 幸存卡牌：装备引用 + relations
+        for (auto &pc : player[p].list_szone)
+        {
+            if (!pc || dead_cards.count(pc))
+                continue;
+            fix_single_ptr(pc->equiping_target);
+            erase_dead_from_card_set(pc->equiping_cards);
+            erase_dead_from_relations(pc);
+        }
+        // 非场上区域幸存卡牌：仅 relations
+        auto fix_zone_relations = [&](card_vector &vec)
+        {
+            for (auto &pc : vec)
+            {
+                if (!pc || dead_cards.count(pc))
+                    continue;
+                erase_dead_from_relations(pc);
+            }
+        };
+        fix_zone_relations(player[p].list_hand);
+        fix_zone_relations(player[p].list_main);
+        fix_zone_relations(player[p].list_grave);
+        fix_zone_relations(player[p].list_remove);
+        fix_zone_relations(player[p].list_extra);
+    }
+    // 步骤 3：解除 home_origin/home_clone 双向绑定
+    for (auto &pc : dead_cards)
+    {
+        if (pc->home_clone)
+        {
+            pc->home_clone->home_origin = nullptr;
+            pc->home_clone = nullptr;
+        }
+        if (pc->home_origin)
+        {
+            pc->home_origin->home_clone = nullptr;
+            pc->home_origin = nullptr;
+        }
+    }
+    // 步骤 4：删除 owner 或 handler 属于 dead_cards 的 effect
+    {
+        auto it = pduel->effects.begin();
+        while (it != pduel->effects.end())
+        {
+            effect *pe = *it;
+            ++it;
+            if (dead_cards.count(pe->owner) || dead_cards.count(pe->handler))
+                pduel->delete_effect(pe);
+        }
+    }
+    // 步骤 5：从所有 group 中移除 dead_cards，空且非只读 group 删除
+    {
+        auto it = pduel->groups.begin();
+        while (it != pduel->groups.end())
+        {
+            group *pgroup = *it;
+            ++it;
+            bool changed = false;
+            for (auto cit = pgroup->container.begin(); cit != pgroup->container.end();)
+            {
+                if (dead_cards.count(*cit))
+                {
+                    cit = pgroup->container.erase(cit);
+                    changed = true;
+                }
+                else
+                    ++cit;
+            }
+            if (changed && pgroup->container.empty() && pgroup->is_readonly != GTYPE_DEFAULT)
+                pduel->delete_group(pgroup);
+        }
+    }
+    // 步骤 6：Lua 反注册 + 从 duel::cards 移除 + delete
+    for (auto &pc : dead_cards)
+    {
+        pduel->assumes.erase(pc);
+        pduel->delete_card(pc);
+    }
+    // 步骤 7：刷新受影响玩家的 used_location
+    for (int p = 0; p < 2; ++p)
+    {
+        if (affected_players[p])
+            refresh_player_info(p);
+    }
+    return (uint32_t)dead_cards.size();
 }
 void field::reload_field_info()
 {
@@ -312,7 +543,7 @@ void field::add_card(uint8_t playerid, card *pcard, uint8_t location, uint8_t se
     else
         pcard->current.pzone = false;
     pcard->apply_field_effect();
-    pcard->fieldid = infos.field_id++;
+    pcard->fieldid = pduel->infos.field_id++;
     pcard->fieldid_r = pcard->fieldid;
     pcard->activate_count_id = pcard->fieldid;
     if (check_unique_onfield(pcard, pcard->current.controler, pcard->current.location))
@@ -469,7 +700,7 @@ void field::move_card(uint8_t playerid, card *pcard, uint8_t location, uint8_t s
                 {
                     refresh_player_info(preplayer);
                     refresh_player_info(playerid);
-                    pcard->fieldid = infos.field_id++;
+                    pcard->fieldid = pduel->infos.field_id++;
                     if (check_unique_onfield(pcard, pcard->current.controler, pcard->current.location))
                         pcard->unique_fieldid = UINT_MAX;
                 }
@@ -567,8 +798,8 @@ void field::swap_card(card *pcard1, card *pcard2, uint8_t new_sequence1, uint8_t
         pcard2->current.sequence = new_sequence1;
         if (p1 != p2)
         {
-            pcard1->fieldid = infos.field_id++;
-            pcard2->fieldid = infos.field_id++;
+            pcard1->fieldid = pduel->infos.field_id++;
+            pcard2->fieldid = pduel->infos.field_id++;
             if (check_unique_onfield(pcard1, pcard1->current.controler, pcard1->current.location))
                 pcard1->unique_fieldid = UINT_MAX;
             if (check_unique_onfield(pcard2, pcard2->current.controler, pcard2->current.location))
@@ -1491,7 +1722,7 @@ void field::add_effect(effect *peffect, uint8_t owner_player)
         peffect->flag[0] |= EFFECT_FLAG_FIELD_ONLY;
         peffect->handler = peffect->owner;
         peffect->effect_owner = owner_player;
-        peffect->id = infos.field_id++;
+        peffect->id = pduel->infos.field_id++;
     }
     peffect->card_type = peffect->owner->data.type;
     effects.indexer.emplace(peffect, it);

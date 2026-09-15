@@ -202,6 +202,7 @@ public:
     card *pre_equip_target{};
     card *overlay_target{};
     card *home_origin{}; // 指向家园场原卡，供战斗结束后回写定位（克隆卡 → 原卡，单向）
+    card *home_clone{};  // 指向战斗场克隆卡（家园场原卡 → 克隆卡，反向）
     relation_map relations;
     counter_map counters;
     effect_count indestructable_effects;

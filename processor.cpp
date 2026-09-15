@@ -1257,7 +1257,7 @@ int32_t field::process_phase_event(int16_t step, int32_t phase)
             peffect->set_activate_location();
             if (!peffect->is_activateable(check_player, test_event))
                 continue;
-            peffect->id = infos.field_id++;
+            peffect->id = pduel->infos.field_id++;
             chain newchain;
             newchain.triggering_effect = peffect;
             newchain.flag |= CHAIN_FORCED;
@@ -1272,7 +1272,7 @@ int32_t field::process_phase_event(int16_t step, int32_t phase)
             // effects.continuous_effect may be changed in is_activateable (e.g. Rescue Cat)
             if (peffect->get_handler_player() != check_player || !peffect->is_activateable(check_player, test_event))
                 continue;
-            peffect->id = infos.field_id++;
+            peffect->id = pduel->infos.field_id++;
             chain newchain;
             newchain.triggering_effect = peffect;
             newchain.flag |= CHAIN_FORCED;
@@ -1314,7 +1314,7 @@ int32_t field::process_phase_event(int16_t step, int32_t phase)
                 peffect->set_activate_location();
                 if (!peffect->is_activateable(check_player, test_event))
                     continue;
-                peffect->id = infos.field_id++;
+                peffect->id = pduel->infos.field_id++;
                 chain newchain;
                 newchain.triggering_effect = peffect;
                 core.select_chains.push_back(newchain);
@@ -1339,7 +1339,7 @@ int32_t field::process_phase_event(int16_t step, int32_t phase)
                 peffect->set_activate_location();
                 if (!peffect->is_chainable(check_player) || !peffect->is_activateable(check_player, test_event))
                     continue;
-                peffect->id = infos.field_id++;
+                peffect->id = pduel->infos.field_id++;
                 chain newchain;
                 newchain.triggering_effect = peffect;
                 if (check_hint_timing(peffect) || check_cteffect_hint(peffect, check_player))
@@ -1355,7 +1355,7 @@ int32_t field::process_phase_event(int16_t step, int32_t phase)
                 peffect->set_activate_location();
                 if (!peffect->is_chainable(check_player) || !peffect->is_activateable(check_player, test_event))
                     continue;
-                peffect->id = infos.field_id++;
+                peffect->id = pduel->infos.field_id++;
                 chain newchain;
                 newchain.triggering_effect = peffect;
                 if (check_hint_timing(peffect))
@@ -1370,7 +1370,7 @@ int32_t field::process_phase_event(int16_t step, int32_t phase)
                 ++eit;
                 if (peffect->get_handler_player() != check_player || !peffect->is_activateable(check_player, test_event))
                     continue;
-                peffect->id = infos.field_id++;
+                peffect->id = pduel->infos.field_id++;
                 chain newchain;
                 newchain.triggering_effect = peffect;
                 core.select_chains.push_back(newchain);
@@ -1460,7 +1460,7 @@ int32_t field::process_phase_event(int16_t step, int32_t phase)
             if (is_opponent)
                 check_player = 1 - infos.turn_player;
             newchain.flag = 0;
-            newchain.chain_id = infos.field_id++;
+            newchain.chain_id = pduel->infos.field_id++;
             newchain.evt = test_event;
             newchain.set_triggering_state(phandler);
             newchain.triggering_player = check_player;
@@ -1789,7 +1789,7 @@ int32_t field::process_point_event(int16_t step, int32_t skip_trigger, int32_t s
                 if (phandler->current.location == LOCATION_MZONE && peffect->is_chainable(infos.turn_player) && peffect->is_activateable(infos.turn_player, e))
                 {
                     newchain.flag = 0;
-                    newchain.chain_id = infos.field_id++;
+                    newchain.chain_id = pduel->infos.field_id++;
                     newchain.evt = e;
                     newchain.triggering_effect = peffect;
                     newchain.set_triggering_state(phandler);
@@ -2011,7 +2011,7 @@ int32_t field::process_quick_effect(int16_t step, int32_t skip_freechain, uint8_
                     {
                         card *phandler = peffect->get_handler();
                         newchain.flag = 0;
-                        newchain.chain_id = infos.field_id++;
+                        newchain.chain_id = pduel->infos.field_id++;
                         newchain.evt = ev;
                         newchain.triggering_effect = peffect;
                         newchain.set_triggering_state(phandler);
@@ -2029,7 +2029,7 @@ int32_t field::process_quick_effect(int16_t step, int32_t skip_freechain, uint8_
                     {
                         card *phandler = peffect->get_handler();
                         newchain.flag = 0;
-                        newchain.chain_id = infos.field_id++;
+                        newchain.chain_id = pduel->infos.field_id++;
                         newchain.evt = ev;
                         newchain.triggering_effect = peffect;
                         newchain.set_triggering_state(phandler);
@@ -2067,7 +2067,7 @@ int32_t field::process_quick_effect(int16_t step, int32_t skip_freechain, uint8_
                 {
                     card *phandler = peffect->get_handler();
                     newchain.flag = 0;
-                    newchain.chain_id = infos.field_id++;
+                    newchain.chain_id = pduel->infos.field_id++;
                     newchain.evt = ev;
                     newchain.triggering_effect = peffect;
                     newchain.set_triggering_state(phandler);
@@ -2095,7 +2095,7 @@ int32_t field::process_quick_effect(int16_t step, int32_t skip_freechain, uint8_
             {
                 card *phandler = peffect->get_handler();
                 newchain.flag = 0;
-                newchain.chain_id = infos.field_id++;
+                newchain.chain_id = pduel->infos.field_id++;
                 newchain.evt = evt;
                 newchain.triggering_effect = peffect;
                 newchain.set_triggering_state(phandler);
@@ -2118,7 +2118,7 @@ int32_t field::process_quick_effect(int16_t step, int32_t skip_freechain, uint8_
                 {
                     card *phandler = peffect->get_handler();
                     newchain.flag = 0;
-                    newchain.chain_id = infos.field_id++;
+                    newchain.chain_id = pduel->infos.field_id++;
                     newchain.evt = free_event;
                     newchain.triggering_effect = peffect;
                     newchain.set_triggering_state(phandler);
@@ -2138,7 +2138,7 @@ int32_t field::process_quick_effect(int16_t step, int32_t skip_freechain, uint8_
                 {
                     card *phandler = peffect->get_handler();
                     newchain.flag = 0;
-                    newchain.chain_id = infos.field_id++;
+                    newchain.chain_id = pduel->infos.field_id++;
                     newchain.evt = free_event;
                     newchain.triggering_effect = peffect;
                     newchain.set_triggering_state(phandler);
@@ -2248,7 +2248,7 @@ int32_t field::process_instant_event()
                 continue;
             peffect->set_activate_location();
             newchain.flag = 0;
-            newchain.chain_id = infos.field_id++;
+            newchain.chain_id = pduel->infos.field_id++;
             newchain.evt = ev;
             newchain.triggering_effect = peffect;
             newchain.set_triggering_state(phandler);
@@ -2270,7 +2270,7 @@ int32_t field::process_instant_event()
                 continue;
             peffect->set_activate_location();
             newchain.flag = 0;
-            newchain.chain_id = infos.field_id++;
+            newchain.chain_id = pduel->infos.field_id++;
             newchain.evt = ev;
             newchain.triggering_effect = peffect;
             newchain.set_triggering_state(phandler);
@@ -2293,7 +2293,7 @@ int32_t field::process_instant_event()
             if (peffect->is_activateable(phandler->current.controler, ev))
             {
                 newchain.flag = 0;
-                newchain.chain_id = infos.field_id++;
+                newchain.chain_id = pduel->infos.field_id++;
                 newchain.evt = ev;
                 newchain.triggering_effect = peffect;
                 newchain.set_triggering_state(phandler);
@@ -2422,7 +2422,7 @@ int32_t field::process_single_event(effect *peffect, const tevent &e, chain_list
         peffect->set_activate_location();
         chain newchain;
         newchain.flag = 0;
-        newchain.chain_id = infos.field_id++;
+        newchain.chain_id = pduel->infos.field_id++;
         newchain.evt = e;
         newchain.triggering_effect = peffect;
         newchain.set_triggering_state(phandler);
@@ -2642,7 +2642,7 @@ int32_t field::process_idle_command(uint16_t step)
             }
             card *phandler = peffect->get_handler();
             newchain.flag = 0;
-            newchain.chain_id = infos.field_id++;
+            newchain.chain_id = pduel->infos.field_id++;
             newchain.evt.event_code = peffect->code;
             newchain.evt.event_player = PLAYER_NONE;
             newchain.evt.event_value = 0;
@@ -2977,7 +2977,7 @@ int32_t field::process_battle_command(uint16_t step)
             }
             card *phandler = peffect->get_handler();
             newchain.flag = 0;
-            newchain.chain_id = infos.field_id++;
+            newchain.chain_id = pduel->infos.field_id++;
             newchain.evt.event_code = peffect->code;
             newchain.evt.event_player = PLAYER_NONE;
             newchain.evt.event_value = 0;
@@ -4542,7 +4542,7 @@ int32_t field::process_turn(uint16_t step, uint8_t turn_player)
     case 2:
     {
         // Draw, new ruling
-        draw(nullptr, REASON_RULE, turn_player, turn_player, 5); // 测试抽牌
+        draw(nullptr, REASON_RULE, turn_player, turn_player, 6); // 测试抽牌
         // 测试发消息
         pduel->write_buffer8(MSG_CUSTOM_CHAT);
         pduel->write_buffer8(0);
@@ -5899,7 +5899,7 @@ int32_t field::adjust_step(uint16_t step)
                     destroy(rcard, 0, REASON_RULE, PLAYER_NONE);
             }
         }
-        core.last_control_changed_id = infos.field_id;
+        core.last_control_changed_id = pduel->infos.field_id;
         return FALSE;
     }
     case 5:

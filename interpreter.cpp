@@ -67,7 +67,7 @@ interpreter::~interpreter()
 {
     lua_close(lua_state);
 }
-void interpreter::register_card(card *pcard)
+void interpreter::register_card(card *pcard, bool register_with_lua)
 {
     if (!pcard)
         return;
@@ -88,8 +88,30 @@ void interpreter::register_card(card *pcard)
     if (is_load_script(pcard->data))
     {
         pcard->set_status(STATUS_INITIALIZING, TRUE);
-        add_param(pcard, PARAM_TYPE_CARD);
-        call_card_function(pcard, "initial_effect", 1, 0);
+        if (register_with_lua)
+        {
+            add_param(pcard, PARAM_TYPE_CARD);
+            call_card_function(pcard, "initial_effect", 1, 0);
+            // 自动发现 c{code}.* 守卫字段（M2.10：per-field 隔离）
+            uint32_t code = pcard->data.get_original_code();
+            char class_name[20];
+            interpreter::sprintf(class_name, "c%d", code);
+            lua_getglobal(current_state, class_name); // +1 c{code}
+            if (!lua_isnil(current_state, -1))
+            { // 通常怪兽/Token 无表
+                for (int fi = 0; fi < duel::GUARD_FIELD_COUNT; fi++)
+                {
+                    lua_getfield(current_state, -1, duel::GUARD_FIELD_NAMES[fi]); // +1 value
+                    if (lua_isboolean(current_state, -1) && lua_toboolean(current_state, -1))
+                    {
+                        uint64_t key = ((uint64_t)code << 8) | fi;
+                        pduel->guard_states[key] |= (1 << pduel->get_field_index(pduel->game_field));
+                    }
+                    lua_pop(current_state, 1); // -1 value
+                }
+            }
+            lua_pop(current_state, 1); // -1 c{code}
+        }
         pcard->set_status(STATUS_INITIALIZING, FALSE);
     }
     pcard->cardid = pduel->next_card_id++;
@@ -182,8 +204,8 @@ int32_t interpreter::load_script(const char *script_name)
 // 读取全局表 table 的 key 字段（整数）
 int32_t interpreter::get_global_int(const char *table, const char *key)
 {
-    lua_getglobal(lua_state, table);   // +1 Auxiliary
-    lua_getfield(lua_state, -1, key);  // +1 Auxiliary.PendulumChecklist
+    lua_getglobal(lua_state, table);  // +1 Auxiliary
+    lua_getfield(lua_state, -1, key); // +1 Auxiliary.PendulumChecklist
     int32_t val = (int32_t)lua_tointeger(lua_state, -1);
     lua_pop(lua_state, 2);
     return val;
@@ -191,10 +213,48 @@ int32_t interpreter::get_global_int(const char *table, const char *key)
 // 写入全局表 table 的 key 字段（整数）
 void interpreter::set_global_int(const char *table, const char *key, int32_t val)
 {
-    lua_getglobal(lua_state, table);       // +1 Auxiliary
-    lua_pushinteger(lua_state, val);       // +1 val
-    lua_setfield(lua_state, -2, key);      // -2
-    lua_pop(lua_state, 1);                 // -1
+    lua_getglobal(lua_state, table);  // +1 Auxiliary
+    lua_pushinteger(lua_state, val);  // +1 val
+    lua_setfield(lua_state, -2, key); // -2
+    lua_pop(lua_state, 1);            // -1
+}
+// 保存 Auxiliary.key 的当前值为 registry ref，返回 ref 索引（M2.10）
+int32_t interpreter::save_global_ref(const char *table, const char *key)
+{
+    lua_getglobal(lua_state, table);                      // +1 table
+    lua_getfield(lua_state, -1, key);                     // +1 value
+    int32_t ref = luaL_ref(lua_state, LUA_REGISTRYINDEX); // -1, 保存到 registry
+    lua_pop(lua_state, 1);                                // -1 table
+    return ref;
+}
+// 从 registry ref 恢复值到 Auxiliary.key，不释放 ref（M2.10）
+void interpreter::restore_global_ref(const char *table, const char *key, int32_t ref)
+{
+    lua_getglobal(lua_state, table);                // +1 table
+    lua_rawgeti(lua_state, LUA_REGISTRYINDEX, ref); // +1 value
+    lua_setfield(lua_state, -2, key);               // -2
+    lua_pop(lua_state, 1);                          // -1
+}
+// 释放 registry ref（M2.10）
+void interpreter::free_global_ref(int32_t ref)
+{
+    luaL_unref(lua_state, LUA_REGISTRYINDEX, ref);
+}
+// 将 Auxiliary.key 设为 nil（M2.10）
+void interpreter::set_global_nil(const char *table, const char *key)
+{
+    lua_getglobal(lua_state, table);  // +1 table
+    lua_pushnil(lua_state);           // +1 nil
+    lua_setfield(lua_state, -2, key); // -2
+    lua_pop(lua_state, 1);            // -1
+}
+// 将 Auxiliary.key 设为空表 {}（M2.10）
+void interpreter::set_global_empty_table(const char *table, const char *key)
+{
+    lua_getglobal(lua_state, table);  // +1 table
+    lua_newtable(lua_state);          // +1 {}
+    lua_setfield(lua_state, -2, key); // -2
+    lua_pop(lua_state, 1);            // -1
 }
 // push table cxxx onto the stack of current_state
 int32_t interpreter::load_card_script(uint32_t code)

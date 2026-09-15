@@ -1719,19 +1719,19 @@ void card::enable_field_effect(bool enabled) {
 		set_status(STATUS_EFFECT_ENABLED, TRUE);
 		for (auto& it : single_effect) {
 			if (it.second->is_flag(EFFECT_FLAG_SINGLE_RANGE) && it.second->in_range(this))
-				it.second->id = pduel->game_field->infos.field_id++;
+				it.second->id = pduel->infos.field_id++;
 		}
 		for (auto& it : field_effect) {
 			if (it.second->in_range(this))
-				it.second->id = pduel->game_field->infos.field_id++;
+				it.second->id = pduel->infos.field_id++;
 		}
 		if(current.location == LOCATION_SZONE) {
 			for (auto& it : equip_effect)
-				it.second->id = pduel->game_field->infos.field_id++;
+				it.second->id = pduel->infos.field_id++;
 		}
 		for (auto& it : target_effect) {
 			if (it.second->in_range(this))
-				it.second->id = pduel->game_field->infos.field_id++;
+				it.second->id = pduel->infos.field_id++;
 		}
 		if (get_status(STATUS_DISABLED))
 			reset(RESET_DISABLE, RESET_EVENT);
@@ -1867,7 +1867,7 @@ int32_t card::add_effect(effect* peffect) {
 	else if (get_status(STATUS_COPYING_EFFECT))
 		peffect->flag[0] |= EFFECT_FLAG_COPY;
 	if (get_status(STATUS_COPYING_EFFECT)) {
-		peffect->copy_id = pduel->game_field->infos.copy_id;
+		peffect->copy_id = pduel->infos.copy_id;
 		peffect->reset_flag |= pduel->game_field->core.copy_reset;
 		peffect->reset_count = pduel->game_field->core.copy_reset_count;
 	}
@@ -2008,7 +2008,7 @@ int32_t card::copy_effect(uint32_t code, uint32_t reset, int32_t count) {
 	pduel->game_field->core.copy_reset_count = count;
 	pduel->lua->add_param(this, PARAM_TYPE_CARD);
 	pduel->lua->call_code_function(code, "initial_effect", 1, 0);
-	++pduel->game_field->infos.copy_id;
+	++pduel->infos.copy_id;
 	set_status(STATUS_COPYING_EFFECT, FALSE);
 	pduel->game_field->core.copy_reset = cr;
 	pduel->game_field->core.copy_reset_count = crc;
@@ -2030,7 +2030,7 @@ int32_t card::copy_effect(uint32_t code, uint32_t reset, int32_t count) {
 		peffect->reset_count = count;
 		this->add_effect(peffect);
 	}
-	return pduel->game_field->infos.copy_id - 1;
+	return pduel->infos.copy_id - 1;
 }
 int32_t card::replace_effect(uint32_t code, uint32_t reset, int32_t count) {
 	card_data cdata;
@@ -2056,7 +2056,7 @@ int32_t card::replace_effect(uint32_t code, uint32_t reset, int32_t count) {
 	pduel->lua->add_param(this, PARAM_TYPE_CARD);
 	pduel->lua->call_code_function(code, "initial_effect", 1, 0);
 	set_status(STATUS_INITIALIZING | STATUS_COPYING_EFFECT, FALSE);
-	++pduel->game_field->infos.copy_id;
+	++pduel->infos.copy_id;
 	pduel->game_field->core.copy_reset = cr;
 	pduel->game_field->core.copy_reset_count = crc;
 	set_status(STATUS_EFFECT_REPLACED, TRUE);
@@ -2078,7 +2078,7 @@ int32_t card::replace_effect(uint32_t code, uint32_t reset, int32_t count) {
 		peffect->reset_count = count;
 		this->add_effect(peffect);
 	}
-	return pduel->game_field->infos.copy_id - 1;
+	return pduel->infos.copy_id - 1;
 }
 void card::reset(uint32_t id, uint32_t reset_type) {
 	if (reset_type != RESET_EVENT && reset_type != RESET_PHASE && reset_type != RESET_CODE && reset_type != RESET_COPY && reset_type != RESET_CARD)

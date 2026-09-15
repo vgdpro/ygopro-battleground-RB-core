@@ -2341,7 +2341,7 @@ int32_t field::flip_summon(uint16_t step, uint8_t sumplayer, card *target, uint3
         target->current.position = POS_FACEUP_ATTACK;
         target->summon_player = sumplayer;
         target->summon_info |= SUMMON_TYPE_FLIP;
-        target->fieldid = infos.field_id++;
+        target->fieldid = pduel->infos.field_id++;
         target->activate_count_id = target->fieldid;
         core.phase_action = TRUE;
         pduel->write_buffer8(MSG_FLIPSUMMONING);
@@ -4787,7 +4787,7 @@ int32_t field::send_to(uint16_t step, group *targets, effect *reason_effect, uin
             pcard->previous.position = pcard->current.position;
             pcard->previous.pzone = pcard->current.pzone;
             pcard->current.reason &= ~REASON_TEMPORARY;
-            pcard->fieldid = infos.field_id++;
+            pcard->fieldid = pduel->infos.field_id++;
             pcard->fieldid_r = pcard->fieldid;
             pcard->reset(RESET_LEAVE, RESET_EVENT);
             pcard->clear_relate_effect();
@@ -5724,7 +5724,7 @@ int32_t field::change_position(uint16_t step, group *targets, effect *reason_eff
             core.hint_timing[pcard->current.controler] |= TIMING_POS_CHANGE;
             if ((opos & POS_FACEDOWN) && (npos & POS_FACEUP))
             {
-                pcard->fieldid = infos.field_id++;
+                pcard->fieldid = pduel->infos.field_id++;
                 pcard->activate_count_id = pcard->fieldid;
                 if (check_unique_onfield(pcard, pcard->current.controler, pcard->current.location))
                     pcard->unique_fieldid = UINT_MAX;
@@ -6122,7 +6122,7 @@ int32_t field::activate_effect(uint16_t step, effect *peffect)
             return TRUE;
         chain newchain;
         newchain.flag = 0;
-        newchain.chain_id = infos.field_id++;
+        newchain.chain_id = pduel->infos.field_id++;
         newchain.evt.event_code = peffect->code;
         newchain.evt.event_player = PLAYER_NONE;
         newchain.evt.event_value = 0;

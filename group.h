@@ -15,30 +15,35 @@
 
 class card;
 class duel;
+class effect;
 
-using card_set = std::set<card*, card_sort>;
+using card_set = std::set<card *, card_sort>;
 
 constexpr uint32_t GTYPE_DEFAULT = 0;
 constexpr uint32_t GTYPE_READ_ONLY = 1;
 constexpr uint32_t GTYPE_KEEP_ALIVE = 2;
 
-class alignas(8) group {
+class alignas(8) group
+{
 public:
-	int32_t ref_handle{ 0 };
-	uint32_t is_readonly{ GTYPE_DEFAULT };
-	duel* pduel;
-	card_set container;
-	card_set::iterator it;
-	bool is_iterator_dirty{ true };
-	
-	bool has_card(card* c) {
-		return container.find(c) != container.end();
-	}
-	
-	explicit group(duel* pd);
-	group(duel* pd, card* pcard);
-	group(duel* pd, const card_set& cset);
-	~group() = default;
+    int32_t ref_handle{0};
+    uint32_t is_readonly{GTYPE_DEFAULT};
+    duel *pduel;
+    card_set container;
+    card_set::iterator it;
+    bool is_iterator_dirty{true};
+    group *home_origin{nullptr}; // 指向源 group（克隆 group → 原 group）
+    group *home_clone{nullptr};  // 指向克隆 group（原 group → 克隆 group）
+
+    bool has_card(card *c)
+    {
+        return container.find(c) != container.end();
+    }
+
+    explicit group(duel *pd);
+    group(duel *pd, card *pcard);
+    group(duel *pd, const card_set &cset);
+    ~group() = default;
 };
 
 #endif /* GROUP_H_ */
