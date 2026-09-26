@@ -213,7 +213,7 @@ card *duel::clone_card_to_field(card *src, uint8_t dst_player,
         pcard->current.position = pos;
         pcard->home_origin = src;
         src->home_clone = pcard; // 反向绑定：家园场原卡 → 战斗场克隆卡
-        // 克隆运行时状态（A/C/D/E 组，unique_function 除外，在 remap_card_references 中处理）
+        // 克隆运行时状态（A/C/D/E 组标量 + B 组指针/容器，unique_function 除外）
         clone_card_state(src, pcard);
         // 克隆超量素材：素材卡处于 LOCATION_OVERLAY，不属于任何区域向量，随怪兽一并克隆
         for (auto &mat : src->xyz_materials)
@@ -222,19 +222,23 @@ card *duel::clone_card_to_field(card *src, uint8_t dst_player,
             mcard->owner = dst_player == 1 ? 1 - mat->owner : mat->owner; // 克隆素材的控制权与原素材相同
             mcard->home_origin = mat;
             mat->home_clone = mcard; // 反向绑定：家园场素材卡 → 战斗场克隆素材卡
+            clone_card_state(mat, mcard);
+            // clone_card_state 复制了 B 组的 overlay_target（指向家园场怪兽），此处覆盖为战斗场克隆怪兽
             mcard->current.controler = PLAYER_NONE;
             mcard->current.location = LOCATION_OVERLAY;
             mcard->current.sequence = (uint8_t)pcard->xyz_materials.size();
             mcard->overlay_target = pcard;
-            clone_card_state(mat, mcard);
             pcard->xyz_materials.push_back(mcard);
         }
         return pcard;
     }
     return nullptr;
 }
-// 复制卡牌运行时状态（A 组 current/previous/spsummon、C 组计数器、D 组唯一性标量、E 组其他标量）
-// unique_function 是 Lua 函数引用，需在 remap_card_references 中独立复制
+// 复制卡牌运行时状态
+// A 组 current/previous/spsummon、C 组计数器、D 组唯一性标量、E 组其他标量；
+// B 组指针/容器（equiping_target/equiping_cards/effect_target_* 等）原样复制后由
+// remap_card_references 映射到战斗场克隆对象；unique_function 与卡→effect 引用由
+// remap_card_references / remap_card_effect_references 单独处理。
 void duel::clone_card_state(card *src, card *dst)
 {
     // A组：运行时状态
@@ -287,6 +291,21 @@ void duel::clone_card_state(card *src, card *dst)
     // 值类型容器直接复制
     dst->counters = src->counters;
     dst->indestructable_effects = src->indestructable_effects;
+    // B组：指针引用与容器
+    // 此处原样复制家园场指针，随后由 remap_card_references 映射到战斗场克隆对象；
+    // 卡→卡映射必须在 clone_effects_to_field 之前完成，因为 card::add_effect 依赖
+    // equiping_target / effect_target_cards 建立 disable 检查目标。
+    dst->equiping_target = src->equiping_target;
+    dst->pre_equip_target = src->pre_equip_target;
+    dst->overlay_target = src->overlay_target;
+    dst->relations = src->relations;
+    dst->announced_cards = src->announced_cards;
+    dst->attacked_cards = src->attacked_cards;
+    dst->battled_cards = src->battled_cards;
+    dst->equiping_cards = src->equiping_cards;
+    dst->material_cards = src->material_cards;
+    dst->effect_target_owner = src->effect_target_owner;
+    dst->effect_target_cards = src->effect_target_cards;
 }
 void duel::clone_effects_to_field(uint8_t battle_field, uint8_t home_field_p0, uint8_t home_field_p1,
                                   const std::unordered_map<card *, card *> &card_map)
@@ -432,10 +451,20 @@ void duel::remap_effect_references(const std::unordered_map<card *, card *> &car
         }
     }
 }
-// 重映射克隆卡牌的 B 组指针引用和 unique_function
-// 必须在 card/effect/group 全部克隆完毕后执行
+// 重映射克隆卡牌的 B 组卡→卡指针引用和 unique_function
+// 必须在全部卡牌克隆完毕后、克隆 effect 之前执行：card::add_effect 注册 EFFECT_TYPE_EQUIP /
+// EFFECT_TYPE_TARGET 效果时会读取 equiping_target / effect_target_cards 建立 disable 检查目标。
 void duel::remap_card_references(const std::unordered_map<card *, card *> &card_map)
 {
+    // 单指针重映射：不在映射中的保持原指针
+    auto remap_card_ptr = [&card_map](card *&ptr)
+    {
+        if (!ptr)
+            return;
+        auto it = card_map.find(ptr);
+        if (it != card_map.end())
+            ptr = it->second;
+    };
     // 重映射 card_set 容器：每个 card* 通过 card_map 替换，不在映射中的保持原指针
     auto remap_card_set = [&card_map](card_set &cset)
     {
@@ -463,30 +492,13 @@ void duel::remap_card_references(const std::unordered_map<card *, card *> &card_
         if (!pc->home_origin)
             continue;
         card *src = pc->home_origin;
-        // 重映射 equiping_target：通过 card_map 替换
-        if (pc->equiping_target)
-        {
-            auto it = card_map.find(pc->equiping_target);
-            if (it != card_map.end())
-                pc->equiping_target = it->second;
-        }
-        // 重映射 pre_equip_target：通过 card_map 替换
-        if (pc->pre_equip_target)
-        {
-            auto it = card_map.find(pc->pre_equip_target);
-            if (it != card_map.end())
-                pc->pre_equip_target = it->second;
-        }
-        // 重映射 overlay_target：通过 card_map 替换（素材卡指向怪兽卡）
-        if (pc->overlay_target)
-        {
-            auto it = card_map.find(pc->overlay_target);
-            if (it != card_map.end())
-                pc->overlay_target = it->second;
-        }
-        // 重映射 unique_effect：通过 home_clone 替换
-        if (pc->unique_effect && pc->unique_effect->home_clone)
-            pc->unique_effect = pc->unique_effect->home_clone;
+        // 重映射单指针：equiping_target / pre_equip_target / overlay_target
+        remap_card_ptr(pc->equiping_target);
+        remap_card_ptr(pc->pre_equip_target);
+        remap_card_ptr(pc->overlay_target);
+        // 重映射卡→卡 reason_card（previous/spsummon 由 clone_card_state 整体复制而来）
+        remap_card_ptr(pc->previous.reason_card);
+        remap_card_ptr(pc->spsummon.reason_card);
         // 重映射 card_set 容器
         remap_card_set(pc->equiping_cards);
         remap_card_set(pc->material_cards);
@@ -509,6 +521,25 @@ void duel::remap_card_references(const std::unordered_map<card *, card *> &card_
         // 克隆 unique_function：Lua 函数引用需独立复制
         if (src->unique_function)
             pc->unique_function = lua->clone_function_ref(src->unique_function);
+    }
+}
+// 重映射克隆卡牌的卡→effect 引用
+// 必须在 effect 克隆与双向绑定完成之后执行（依赖 effect::home_clone）
+void duel::remap_card_effect_references()
+{
+    for (auto *pc : cards)
+    {
+        // 只处理克隆卡（home_origin 非空表示这是战斗场克隆）
+        if (!pc->home_origin)
+            continue;
+        // 重映射 unique_effect：通过 home_clone 替换
+        if (pc->unique_effect && pc->unique_effect->home_clone)
+            pc->unique_effect = pc->unique_effect->home_clone;
+        // 重映射卡→effect reason_effect（previous/spsummon 由 clone_card_state 整体复制而来）
+        if (pc->previous.reason_effect && pc->previous.reason_effect->home_clone)
+            pc->previous.reason_effect = pc->previous.reason_effect->home_clone;
+        if (pc->spsummon.reason_effect && pc->spsummon.reason_effect->home_clone)
+            pc->spsummon.reason_effect = pc->spsummon.reason_effect->home_clone;
     }
 }
 bool duel::return_field_to_main(uint8_t battle_field)

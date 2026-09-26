@@ -196,6 +196,10 @@ OCGCORE_API int32_t merge_field_to_bp(intptr_t pduel, uint8_t battle_field,
     std::unordered_map<card *, card *> card_map;
     clone_field_cards(pd, battle_field, home_field_p0, 0, 0, card_map);
     clone_field_cards(pd, battle_field, home_field_p1, 0, 1, card_map);
+    // 重映射卡牌 B 组卡→卡指针引用（equiping_target/equiping_cards/effect_target_* 等）和 unique_function
+    // 必须在 clone_effects_to_field 之前执行：card::add_effect 注册 EFFECT_TYPE_EQUIP /
+    // EFFECT_TYPE_TARGET 效果时会读取 equiping_target / effect_target_cards 建立 disable 检查目标
+    pd->remap_card_references(card_map);
     // 克隆所有效果到战斗场卡牌和 temp_card
     pd->clone_effects_to_field(battle_field, home_field_p0, home_field_p1, card_map);
     // 全量克隆所有 group 到战斗场，并建立双向绑定
@@ -203,9 +207,11 @@ OCGCORE_API int32_t merge_field_to_bp(intptr_t pduel, uint8_t battle_field,
     // 重映射 effect 额外属性（label_object/required_handorset_effects/active_handler/last_handler）
     // 必须在 card/effect/group 全部克隆完毕后执行，因为 label_object 可能引用 group
     pd->remap_effect_references(card_map);
-    // 重映射卡牌 B 组指针引用（equiping_target/material_cards/relations 等）和 unique_function
-    // 必须在 card/effect/group 全部克隆完毕后执行
-    pd->remap_card_references(card_map);
+    // 重映射卡牌卡→effect 引用（unique_effect/reason_effect），依赖 effect 克隆完成
+    pd->remap_card_effect_references();
+    for (auto &entry : card_map)
+        entry.second->apply_field_effect();
+    pd->fields[battle_field]->adjust_instant();
     // 刷新战斗场连续效果
     pd->fields[battle_field]->adjust_all();
     // pd->game_field = pd->fields[battle_field];

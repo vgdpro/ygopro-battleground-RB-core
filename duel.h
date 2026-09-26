@@ -106,6 +106,7 @@ public:
     void clone_groups_to_field(uint8_t battle_field, const std::unordered_map<card *, card *> &card_map);
     void remap_effect_references(const std::unordered_map<card *, card *> &card_map);
     void remap_card_references(const std::unordered_map<card *, card *> &card_map);
+    void remap_card_effect_references();
     bool return_field_to_main(uint8_t battle_field);
     group *new_group();
     group *new_group(card *pcard);
