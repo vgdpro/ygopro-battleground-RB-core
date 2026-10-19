@@ -540,6 +540,10 @@ OCGCORE_API void set_active_field(intptr_t pduel, uint8_t field_idx)
     if (field_idx < pd->FIELD_COUNT)
     {
         int old_idx = pd->get_field_index(pd->game_field);
+        // 同场短路：目标场与当前场相同时，下面的 Lua 快照/恢复对同一场自赋值，
+        // 净效果为零，直接返回即可（响应路径上大量重复调用会因此变成零开销）
+        if (old_idx == field_idx)
+            return;
         // 保存旧 field 的 PendulumChecklist（从 Lua 全局读回，包含脚本的修改）
         if (old_idx < pd->FIELD_COUNT)
             pd->fields[old_idx]->infos.pendulum_checklist =
