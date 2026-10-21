@@ -4393,8 +4393,8 @@ int32_t field::process_start(uint16_t step)
         // 通知 gframe 初始化完成
         pduel->write_buffer8(MSG_FIELD_READY);
         pduel->write_buffer8(infos.turn_player);
-        pduel->write_buffer8(player[0].lp);
-        pduel->write_buffer8(player[1].lp);
+        pduel->write_buffer32(player[0].lp);
+        pduel->write_buffer32(player[1].lp);
         return TRUE;
     }
     }
@@ -4743,8 +4743,8 @@ int32_t field::process_turn(uint16_t step, uint8_t turn_player)
         // BP结束后各自的field从这里开始，所以在这里增加一个刷新客户端场地的请求
         pduel->write_buffer8(MSG_FIELD_READY);
         pduel->write_buffer8(infos.turn_player);
-        pduel->write_buffer8(player[0].lp);
-        pduel->write_buffer8(player[1].lp);
+        pduel->write_buffer32(player[0].lp);
+        pduel->write_buffer32(player[1].lp);
         // End Phase
         infos.phase = PHASE_END;
         core.phase_action = FALSE;
